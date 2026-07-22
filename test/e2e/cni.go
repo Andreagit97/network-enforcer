@@ -24,6 +24,19 @@ const (
 	cilium cniType = "cilium"
 )
 
+func addLocalChartRepo(manager *helm.Manager, logger *slog.Logger, localRepoName, repoURL string) error {
+	logger.Info("⬇️ adding local helm repo",
+		"localName", localRepoName,
+		"url", repoURL)
+	if err := manager.RunRepo(helm.WithArgs("add", localRepoName, repoURL)); err != nil {
+		return fmt.Errorf("failed to add local helm repo: %w", err)
+	}
+	if err := manager.RunRepo(helm.WithArgs("update")); err != nil {
+		return fmt.Errorf("failed to update helm repos: %w", err)
+	}
+	return nil
+}
+
 func installCilium(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
 	const (
 		namespace     = "kube-system"
@@ -99,11 +112,6 @@ func installCilium(ctx context.Context, cfg *envconf.Config) (context.Context, e
 	); err != nil {
 		return ctx, fmt.Errorf("wait cilium daemonset ready: %w", err)
 	}
-	return ctx, nil
-}
-
-func installCalico(ctx context.Context, _ *envconf.Config) (context.Context, error) {
-	// todo!: Install calico CNI
 	return ctx, nil
 }
 

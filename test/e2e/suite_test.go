@@ -38,6 +38,9 @@ func TestMain(m *testing.M) {
 		envfuncs.CreateClusterWithConfig(kind.NewProvider(), clusterName, testSuiteConf.kindConfigPath),
 		envfuncs.LoadImageToCluster(clusterName, testSuiteConf.controllerImage),
 		envfuncs.LoadImageToCluster(clusterName, testSuiteConf.cniWatcherImage),
+		// todo!: we can use the context instead of passing the config
+		// todo!: we can use the context to provide the logger
+
 		installCNI(testSuiteConf.cni),
 		installCertManager(),
 		installNetEnforcerChart(&testSuiteConf),
