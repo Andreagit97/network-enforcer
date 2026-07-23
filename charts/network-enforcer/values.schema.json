@@ -289,27 +289,6 @@
         "kubernetesClusterDomain": {
             "type": "string"
         },
-        "otel": {
-            "type": "object",
-            "properties": {
-                "endpoint": {
-                    "type": "string"
-                },
-                "protocol": {
-                    "type": "string"
-                },
-                "caCert": {
-                    "type": "string"
-                },
-                "clientCert": {
-                    "type": "string"
-                },
-                "clientKey": {
-                    "type": "string"
-                }
-            },
-            "additionalProperties": false
-        },
         "obi": {
             "type": "object",
             "properties": {
@@ -478,6 +457,27 @@
         "opentelemetry-ebpf-instrumentation": {
             "type": "object",
             "additionalProperties": true
+        },
+        "otel": {
+            "type": "object",
+            "properties": {
+                "caCert": {
+                    "type": "string"
+                },
+                "clientCert": {
+                    "type": "string"
+                },
+                "clientKey": {
+                    "type": "string"
+                },
+                "endpoint": {
+                    "type": "string"
+                },
+                "protocol": {
+                    "type": "string"
+                }
+            },
+            "additionalProperties": false
         }
     },
     "additionalProperties": false
