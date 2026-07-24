@@ -17,8 +17,6 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
 )
 
-const DefaultOtelCollectorEndpoint = "localhost:4317"
-
 type OpenTelemetryConfig struct {
 	Ctx               context.Context
 	Log               *slog.Logger
@@ -45,10 +43,6 @@ func NewOpenTelemetryService(cfg OpenTelemetryConfig) *Service {
 }
 
 func (s *Service) Start() error {
-	if s.Config.CollectorEndpoint == "" {
-		s.Config.CollectorEndpoint = DefaultOtelCollectorEndpoint
-	}
-
 	transportOpt, err := s.exporterTransportOption()
 	if err != nil {
 		return err
