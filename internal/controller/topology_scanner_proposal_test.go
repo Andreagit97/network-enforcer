@@ -38,7 +38,7 @@ func newTestTopologyScanner(t *testing.T, objs ...client.Object) *TopologyScanne
 	return &TopologyScanner{client: cl}
 }
 
-func TestTopologyScannerReconcileProposal(t *testing.T) {
+func TestTopologyScannerReconcileConnection(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -147,7 +147,7 @@ func TestTopologyScannerReconcileProposal(t *testing.T) {
 			t.Parallel()
 
 			scanner := newTestTopologyScanner(t, tt.setup()...)
-			require.NoError(t, scanner.reconcileProposal(
+			require.NoError(t, scanner.reconcileConnection(
 				t.Context(),
 				workload,
 				networkingv1.PolicyTypeEgress,
