@@ -80,14 +80,8 @@ func (w *Watcher) ProcessPolicyDenyEvent(event *types.PolicyDenyEvent) error {
 	// It is possible that some CNIs will send the protocol in lower case
 	// to avoid issues with case sensitivity, we normalize it to upper case here.
 	event.Protocol = corev1.Protocol(strings.ToUpper(string(event.Protocol)))
-	switch event.Protocol {
-	case corev1.ProtocolTCP:
-		event.Protocol = corev1.ProtocolTCP
-	case corev1.ProtocolUDP:
-		event.Protocol = corev1.ProtocolUDP
-	case corev1.ProtocolSCTP:
-		fallthrough
-	default:
+	if event.Protocol != corev1.ProtocolTCP &&
+		event.Protocol != corev1.ProtocolUDP {
 		return fmt.Errorf("unsupported protocol coming from a CNI: %s", event.Protocol)
 	}
 
