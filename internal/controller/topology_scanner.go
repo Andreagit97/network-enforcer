@@ -125,6 +125,62 @@ func (ts *TopologyScanner) updateProposal(
 	return nil
 }
 
+func (ts *TopologyScanner) sendMonitorViolations(
+	ctx context.Context,
+	policy *securityv1alpha1.WorkloadNetworkPolicy,
+	direction networkingv1.PolicyType,
+	peers sets.Set[topology.Peer],
+) error {
+	_, err := ts.getMonitorViolations(ctx, policy, direction, peers)
+	if err != nil {
+		return err
+	}
+
+	// todo!: push each violation inside a shared buffer
+	// todo!: send each violation through otel
+
+	return nil
+}
+
+func (ts *TopologyScanner) getMonitorViolations(
+	ctx context.Context,
+	policy *securityv1alpha1.WorkloadNetworkPolicy,
+	direction networkingv1.PolicyType,
+	peers sets.Set[topology.Peer],
+) ([]securityv1alpha1.ViolationRecord, error) {
+	var violations []securityv1alpha1.ViolationRecord
+	switch direction {
+	case networkingv1.PolicyTypeEgress:
+		for _, peer := range peers.UnsortedList() {
+			rule, err := ts.buildEgressRuleFromPeer(ctx, peer)
+			if err != nil {
+				return nil, fmt.Errorf("resolving egress peer selector: %w", err)
+			}
+			if !containsRule(rule, policy.Spec.PolicyTemplate.Egress, securityv1alpha1.EgressRuleEqual) {
+				violations = append(violations, securityv1alpha1.ViolationRecord{
+					// todo!:
+				})
+			}
+		}
+	case networkingv1.PolicyTypeIngress:
+		for _, peer := range peers.UnsortedList() {
+			rule, err := ts.buildIngressRuleFromPeer(ctx, peer)
+			if err != nil {
+				return nil, fmt.Errorf("resolving ingress peer selector: %w", err)
+			}
+
+			if !containsRule(rule, policy.Spec.PolicyTemplate.Ingress, securityv1alpha1.IngressRuleEqual) {
+				violations = append(violations, securityv1alpha1.ViolationRecord{
+					// todo!:
+				})
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unknown direction: %s", direction)
+	}
+	return violations, nil
+}
+
 func (ts *TopologyScanner) reconcileConnection(
 	ctx context.Context,
 	workload topology.WorkloadKey,
@@ -155,8 +211,7 @@ func (ts *TopologyScanner) reconcileConnection(
 			return nil
 		}
 		// we are in monitor mode we need to report violations
-		// todo!: for now we just return nil
-		return nil
+		return ts.sendMonitorViolations(ctx, &policy, direction, peers)
 	default:
 		return errors.New("multiple policies associated with the same proposal")
 	}
