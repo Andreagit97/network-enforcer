@@ -458,23 +458,89 @@
             "type": "object",
             "additionalProperties": true
         },
-        "otel": {
+        "telemetry": {
             "type": "object",
             "properties": {
-                "caCert": {
-                    "type": "string"
+                "collectorStrategy": {
+                    "type": "string",
+                    "enum": [
+                        "none",
+                        "default",
+                        "external"
+                    ]
                 },
-                "clientCert": {
-                    "type": "string"
+                "defaultCollector": {
+                    "type": "object",
+                    "properties": {
+                        "image": {
+                            "type": "object",
+                            "properties": {
+                                "pullPolicy": {
+                                    "type": "string"
+                                },
+                                "repository": {
+                                    "type": "string"
+                                },
+                                "tag": {
+                                    "type": "string"
+                                }
+                            },
+                            "additionalProperties": false
+                        },
+                        "resources": {
+                            "type": "object",
+                            "properties": {
+                                "limits": {
+                                    "type": "object",
+                                    "properties": {
+                                        "cpu": {
+                                            "type": "string"
+                                        },
+                                        "memory": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "additionalProperties": false
+                                },
+                                "requests": {
+                                    "type": "object",
+                                    "properties": {
+                                        "cpu": {
+                                            "type": "string"
+                                        },
+                                        "memory": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "additionalProperties": false
+                                }
+                            },
+                            "additionalProperties": false
+                        }
+                    },
+                    "additionalProperties": false
                 },
-                "clientKey": {
-                    "type": "string"
-                },
-                "endpoint": {
-                    "type": "string"
-                },
-                "protocol": {
-                    "type": "string"
+                "externalCollector": {
+                    "type": "object",
+                    "properties": {
+                        "endpoint": {
+                            "type": "string"
+                        },
+                        "otelCollectorCertificateSecret": {
+                            "type": "string"
+                        },
+                        "otelCollectorClientCertificateSecret": {
+                            "type": "string"
+                        },
+                        "protocol": {
+                            "type": "string",
+                            "enum": [
+                                "grpc",
+                                "http/protobuf"
+                            ]
+                        }
+                    },
+                    "additionalProperties": false
                 }
             },
             "additionalProperties": false

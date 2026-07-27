@@ -20,7 +20,11 @@ helm upgrade --install network-enforcer ./charts/network-enforcer \
   --set cniwatcher.image.tag=<tag>
 ```
 
-Set `otel.endpoint` to your OTLP log collector endpoint. When empty, OTLP is disabled for the component.
+Telemetry export is configured under the top-level `telemetry` block, shared with the controller:
+
+- `telemetry.collectorStrategy: default` ships an OpenTelemetry collector together with this chart; components export OTLP to it over mTLS.
+- `telemetry.collectorStrategy: external` exports to `telemetry.externalCollector.endpoint` (optionally secured with `otelCollectorCertificateSecret` / `otelCollectorClientCertificateSecret`).
+- `telemetry.collectorStrategy: none` disables OTLP export for the components.
 
 ## Local development (Tilt)
 

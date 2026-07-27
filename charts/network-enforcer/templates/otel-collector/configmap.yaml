@@ -1,0 +1,38 @@
+{{- if eq .Values.telemetry.collectorStrategy "default" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "network-enforcer.fullname" . }}-otel-collector
+  labels:
+  {{- include "network-enforcer.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+            tls:
+              cert_file: {{ include "network-enforcer.otelCollector.certDir" . }}/tls.crt
+              key_file: {{ include "network-enforcer.otelCollector.certDir" . }}/tls.key
+    processors:
+      deltatocumulative: {}
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    exporters:
+      debug:
+        verbosity: normal
+      prometheus:
+        endpoint: 0.0.0.0:9090
+    service:
+      extensions: [health_check]
+      pipelines:
+        logs:
+          receivers: [otlp]
+          exporters: [debug]
+        metrics:
+          receivers: [otlp]
+          processors: [deltatocumulative]
+          exporters: [prometheus]
+{{- end }}
