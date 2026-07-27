@@ -93,6 +93,23 @@ func (ts *TopologyScanner) proposalLogger(workload *topology.WorkloadKey) *slog.
 	)
 }
 
+func (ts *TopologyScanner) reconcileConnections(
+	ctx context.Context,
+	connections map[topology.WorkloadKey]sets.Set[topology.Peer],
+	direction networkingv1.PolicyType,
+) {
+	for workload, peers := range connections {
+		ts.proposalLogger(&workload).InfoContext(ctx, "Reconciling proposal",
+			"direction", direction,
+			"peers", len(peers))
+		if err := ts.reconcileProposal(ctx, workload, direction, peers); err != nil {
+			ts.proposalLogger(&workload).WarnContext(ctx, "Could not reconcile proposal",
+				"direction", direction,
+				"error", err)
+		}
+	}
+}
+
 func (ts *TopologyScanner) scan(ctx context.Context) {
 	// todo!: it would be nice to drain only connections that are correctly reconciled.
 	// at the moment we just log a warning and we drop the connection.
@@ -106,19 +123,8 @@ func (ts *TopologyScanner) scan(ctx context.Context) {
 		"ingress policies",
 		len(connections.Ingress),
 	)
-	for workload, peers := range connections.Egress {
-		ts.proposalLogger(&workload).InfoContext(ctx, "Reconciling egress proposal", "peers", len(peers))
-		if err := ts.reconcileProposal(ctx, workload, networkingv1.PolicyTypeEgress, peers); err != nil {
-			ts.proposalLogger(&workload).WarnContext(ctx, "Could not reconcile egress proposal", "error", err)
-		}
-	}
-
-	for workload, peers := range connections.Ingress {
-		ts.proposalLogger(&workload).InfoContext(ctx, "Reconciling ingress proposal", "peers", len(peers))
-		if err := ts.reconcileProposal(ctx, workload, networkingv1.PolicyTypeIngress, peers); err != nil {
-			ts.proposalLogger(&workload).WarnContext(ctx, "Could not reconcile ingress proposal", "error", err)
-		}
-	}
+	ts.reconcileConnections(ctx, connections.Egress, networkingv1.PolicyTypeEgress)
+	ts.reconcileConnections(ctx, connections.Ingress, networkingv1.PolicyTypeIngress)
 }
 
 func (ts *TopologyScanner) reconcileProposal(
