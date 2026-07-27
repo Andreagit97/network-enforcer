@@ -217,6 +217,36 @@ func (ts *TopologyScanner) buildSpec(
 	return nil
 }
 
+func (ts *TopologyScanner) buildEgressRuleFromPeer(
+	ctx context.Context,
+	peer topology.Peer,
+) (networkingv1.NetworkPolicyEgressRule, error) {
+	policyPeer, policyPort, err := ts.buildPeerRuleParts(ctx, peer)
+	if err != nil {
+		return networkingv1.NetworkPolicyEgressRule{}, fmt.Errorf("resolving egress peer selector: %w", err)
+	}
+
+	return networkingv1.NetworkPolicyEgressRule{
+		To:    []networkingv1.NetworkPolicyPeer{policyPeer},
+		Ports: []networkingv1.NetworkPolicyPort{policyPort},
+	}, nil
+}
+
+func (ts *TopologyScanner) buildIngressRuleFromPeer(
+	ctx context.Context,
+	peer topology.Peer,
+) (networkingv1.NetworkPolicyIngressRule, error) {
+	policyPeer, policyPort, err := ts.buildPeerRuleParts(ctx, peer)
+	if err != nil {
+		return networkingv1.NetworkPolicyIngressRule{}, fmt.Errorf("resolving ingress peer selector: %w", err)
+	}
+
+	return networkingv1.NetworkPolicyIngressRule{
+		From:  []networkingv1.NetworkPolicyPeer{policyPeer},
+		Ports: []networkingv1.NetworkPolicyPort{policyPort},
+	}, nil
+}
+
 func (ts *TopologyScanner) buildEgressRules(
 	ctx context.Context,
 	peers sets.Set[topology.Peer],
@@ -225,17 +255,12 @@ func (ts *TopologyScanner) buildEgressRules(
 
 	rules := make([]networkingv1.NetworkPolicyEgressRule, 0, len(peerList))
 	for _, peer := range peerList {
-		policyPeer, policyPort, err := ts.buildPeerRuleParts(ctx, peer)
+		rule, err := ts.buildEgressRuleFromPeer(ctx, peer)
 		if err != nil {
 			return nil, fmt.Errorf("resolving egress peer selector: %w", err)
 		}
-
-		rules = append(rules, networkingv1.NetworkPolicyEgressRule{
-			To:    []networkingv1.NetworkPolicyPeer{policyPeer},
-			Ports: []networkingv1.NetworkPolicyPort{policyPort},
-		})
+		rules = append(rules, rule)
 	}
-
 	return rules, nil
 }
 
@@ -247,15 +272,11 @@ func (ts *TopologyScanner) buildIngressRules(
 
 	rules := make([]networkingv1.NetworkPolicyIngressRule, 0, len(peerList))
 	for _, peer := range peerList {
-		policyPeer, policyPort, err := ts.buildPeerRuleParts(ctx, peer)
+		rule, err := ts.buildIngressRuleFromPeer(ctx, peer)
 		if err != nil {
 			return nil, fmt.Errorf("resolving ingress peer selector: %w", err)
 		}
-
-		rules = append(rules, networkingv1.NetworkPolicyIngressRule{
-			From:  []networkingv1.NetworkPolicyPeer{policyPeer},
-			Ports: []networkingv1.NetworkPolicyPort{policyPort},
-		})
+		rules = append(rules, rule)
 	}
 
 	return rules, nil
