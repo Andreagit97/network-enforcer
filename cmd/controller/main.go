@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"os"
 	"time"
 
+	otellog "go.opentelemetry.io/otel/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/go-logr/logr"
@@ -39,6 +41,7 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/controller"
+	"github.com/rancher-sandbox/network-enforcer/internal/events"
 	"github.com/rancher-sandbox/network-enforcer/internal/grpcexporter"
 	"github.com/rancher-sandbox/network-enforcer/internal/receiver"
 	"github.com/rancher-sandbox/network-enforcer/internal/topology"
@@ -48,7 +51,19 @@ import (
 const (
 	defaultDrainFlowsInterval      = 30 * time.Second
 	defaultWnpStatusUpdateInterval = 30 * time.Second
+	// otlpLogShutdownTimeout bounds the final flush of buffered log records
+	// when the manager stops. The manager context is already cancelled at
+	// that point, so the shutdown runs against a fresh context.
+	otlpLogShutdownTimeout = 10 * time.Second
 )
+
+type otelConf struct {
+	Endpoint   string
+	Protocol   string
+	CACert     string
+	ClientCert string
+	ClientKey  string
+}
 
 type config struct {
 	metricsAddr          string
@@ -60,6 +75,7 @@ type config struct {
 	secureMetrics        bool
 	enableHTTP2          bool
 	otlpPort             int
+	otel                 otelConf
 	drainFlowsInterval   time.Duration
 	tlsOpts              []func(*tls.Config)
 	wnpStatusSyncConfig  controller.WorkloadNetworkPolicyStatusSyncConfig
@@ -108,10 +124,60 @@ func newControllerManager(conf *config) (manager.Manager, error) {
 	return mgr, nil
 }
 
+// setupOtelLogExporter initialises the OTLP log exporter and registers
+// its shutdown runnable. Caller must ensure conf.otel.Endpoint is set.
+func setupOtelLogExporter(
+	ctx context.Context,
+	logger *slog.Logger,
+	mgr manager.Manager,
+	otelCfg events.OTELConfig,
+) (otellog.Logger, error) {
+	eventLogger, eventShutdown, err := events.Init(ctx, otelCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize OTLP log exporter: %w", err)
+	}
+	logger.InfoContext(ctx, "OTLP violation telemetry enabled",
+		"endpoint", otelCfg.Endpoint,
+		"protocol", otelCfg.Protocol)
+
+	err = mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		<-ctx.Done()
+		if eventShutdown != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), otlpLogShutdownTimeout)
+			defer cancel()
+			if sErr := eventShutdown(shutdownCtx); sErr != nil {
+				logger.ErrorContext(ctx, "failed to shutdown OTLP log provider", "error", sErr)
+			}
+		}
+		return nil
+	}))
+	if err != nil {
+		return nil, fmt.Errorf("unable to register OTLP log shutdown runnable: %w", err)
+	}
+	return eventLogger, nil
+}
+
 func run(logger *slog.Logger, conf *config) error {
+	ctx := ctrl.SetupSignalHandler()
+
 	mgr, err := newControllerManager(conf)
 	if err != nil {
 		return fmt.Errorf("unable to create controller manager: %w", err)
+	}
+
+	var eventLogger otellog.Logger
+	if conf.otel.Endpoint != "" {
+		otelCfg := events.OTELConfig{
+			Endpoint:   conf.otel.Endpoint,
+			Protocol:   conf.otel.Protocol,
+			CACert:     conf.otel.CACert,
+			ClientCert: conf.otel.ClientCert,
+			ClientKey:  conf.otel.ClientKey,
+		}
+		eventLogger, err = setupOtelLogExporter(ctx, logger, mgr, otelCfg)
+		if err != nil {
+			return err
+		}
 	}
 
 	store := topology.NewStore()
@@ -144,7 +210,8 @@ func run(logger *slog.Logger, conf *config) error {
 	}
 
 	conf.wnpStatusSyncConfig.AgentPoolConf.Logger = logger.With("component", "agent-pool")
-	logger.Info("Setting up WorkloadNetworkPolicyStatusSync with",
+	conf.wnpStatusSyncConfig.EventLogger = eventLogger
+	logger.InfoContext(ctx, "Setting up WorkloadNetworkPolicyStatusSync with",
 		"config", conf.wnpStatusSyncConfig)
 	var wnpStatusSync *controller.WorkloadNetworkPolicyStatusSync
 	if wnpStatusSync, err = controller.NewWorkloadNetworkPolicyStatusSync(
@@ -166,8 +233,8 @@ func run(logger *slog.Logger, conf *config) error {
 		return fmt.Errorf("unable to add readyz check: %w", err)
 	}
 
-	logger.Info("starting manager")
-	return mgr.Start(ctrl.SetupSignalHandler())
+	logger.InfoContext(ctx, "starting manager")
+	return mgr.Start(ctx)
 }
 
 func main() {
@@ -192,6 +259,32 @@ func main() {
 	flag.BoolVar(&conf.enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics server")
 	flag.IntVar(&conf.otlpPort, "otlp-port", 4317, "The port the OTLP gRPC receiver listens on.")
+	flag.StringVar(&conf.otel.Endpoint, "otlp-log-endpoint",
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		"OTLP endpoint for the violation-lifecycle log exporter "+
+			"(policy_violation_acknowledged records). Defaults to the "+
+			"OTEL_EXPORTER_OTLP_ENDPOINT env var; empty disables OTLP logs.")
+	otlpLogProtocolDefault := os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL")
+	if otlpLogProtocolDefault == "" {
+		otlpLogProtocolDefault = "grpc"
+	}
+	flag.StringVar(&conf.otel.Protocol, "otlp-log-protocol",
+		otlpLogProtocolDefault,
+		"OTLP protocol for the violation-lifecycle log exporter: grpc or "+
+			"http/protobuf. Defaults to OTEL_EXPORTER_OTLP_PROTOCOL env var or grpc.")
+	flag.StringVar(&conf.otel.CACert, "otlp-log-ca-cert",
+		os.Getenv("OTEL_EXPORTER_OTLP_CERTIFICATE"),
+		"Path to the CA certificate for verifying the OTLP log collector's "+
+			"TLS certificate. Defaults to the OTEL_EXPORTER_OTLP_CERTIFICATE env "+
+			"var; empty means insecure.")
+	flag.StringVar(&conf.otel.ClientCert, "otlp-log-client-cert",
+		os.Getenv("OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE"),
+		"Path to the client TLS certificate for mTLS with the OTLP log "+
+			"collector. Defaults to the OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE env var.")
+	flag.StringVar(&conf.otel.ClientKey, "otlp-log-client-key",
+		os.Getenv("OTEL_EXPORTER_OTLP_CLIENT_KEY"),
+		"Path to the client TLS key for mTLS with the OTLP log collector. "+
+			"Defaults to the OTEL_EXPORTER_OTLP_CLIENT_KEY env var.")
 	flag.DurationVar(&conf.drainFlowsInterval, "drain-flows-interval",
 		defaultDrainFlowsInterval, "The interval at which flows are drained.")
 	flag.DurationVar(&conf.wnpStatusSyncConfig.UpdateInterval,

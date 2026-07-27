@@ -40,8 +40,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: {{ include "network-enforcer.cniwatcher.otelEndpoint" . | quote }}
+            {{- include "network-enforcer.otel.config.env" . | indent 12 }}
             - name: CNIWATCHER_CNI_TYPE
               value: {{ $cni | quote }}
 

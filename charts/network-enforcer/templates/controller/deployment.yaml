@@ -41,6 +41,7 @@ spec:
         env:
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
+        {{- include "network-enforcer.otel.config.env" . | indent 8 }}
         {{- with .Values.controller.env }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
