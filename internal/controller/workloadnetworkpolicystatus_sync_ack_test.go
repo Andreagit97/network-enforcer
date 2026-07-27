@@ -182,7 +182,7 @@ func TestAcknowledgedViolationEventShape(t *testing.T) {
 	require.Equal(t, 1, logger.Count())
 	require.NotNil(t, logger.captured)
 
-	require.Equal(t, EventNamePolicyViolationAcknowledged, logger.captured.EventName())
+	require.Equal(t, eventNamePolicyViolationAcknowledged, logger.captured.EventName())
 	require.Equal(t, otellog.SeverityInfo, logger.captured.Severity())
 
 	attrs := map[string]string{}

@@ -22,7 +22,7 @@ import (
 	agentv1 "github.com/rancher-sandbox/network-enforcer/proto/agent/v1"
 )
 
-const EventNamePolicyViolationAcknowledged = "policy_violation_acknowledged"
+const eventNamePolicyViolationAcknowledged = "policy_violation_acknowledged"
 
 type AgentClientPoolAPI interface {
 	UpdatePool(ctx context.Context, reader client.Reader) (map[string]grpcexporter.AgentClientAPI, error)
@@ -358,9 +358,9 @@ func (r *WorkloadNetworkPolicyStatusSync) emitAcknowledgedViolationOtelLog(
 ) {
 	violation := ack.Violation
 	var rec otellog.Record
-	rec.SetEventName(EventNamePolicyViolationAcknowledged)
+	rec.SetEventName(eventNamePolicyViolationAcknowledged)
 	rec.SetSeverity(otellog.SeverityInfo)
-	rec.SetBody(otellog.StringValue(EventNamePolicyViolationAcknowledged))
+	rec.SetBody(otellog.StringValue(eventNamePolicyViolationAcknowledged))
 	rec.SetTimestamp(time.Now())
 	rec.AddAttributes(
 		otellog.Int64("id", violation.ID),

@@ -157,7 +157,9 @@ func setupOtelLogExporter(
 	return eventLogger, nil
 }
 
-func run(ctx context.Context, logger *slog.Logger, conf *config) error {
+func run(logger *slog.Logger, conf *config) error {
+	ctx := ctrl.SetupSignalHandler()
+
 	mgr, err := newControllerManager(conf)
 	if err != nil {
 		return fmt.Errorf("unable to create controller manager: %w", err)
@@ -311,9 +313,7 @@ func main() {
 	slog.SetDefault(slogger)
 	ctrl.SetLogger(logr.FromSlogHandler(slogger.Handler()))
 
-	ctx := ctrl.SetupSignalHandler()
-
-	if err := run(ctx, slogger, conf); err != nil {
+	if err := run(slogger, conf); err != nil {
 		slogger.Error("failed to run", "error", err)
 		os.Exit(1)
 	}
