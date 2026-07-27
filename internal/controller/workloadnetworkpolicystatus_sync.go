@@ -375,13 +375,15 @@ func (r *WorkloadNetworkPolicyStatusSync) emitAcknowledgedViolationOtelLog(
 		otellog.String("dest.workload.name", violation.Dest.OwnerName),
 		otellog.String("protocol", string(violation.Protocol)),
 		otellog.Int64("dstPort", int64(violation.DstPort)),
-		otellog.String("action", violation.Action),
+		otellog.String("action", string(violation.Action)),
 		otellog.String("node.name", violation.NodeName),
 		otellog.String("denyingPolicy.namespace", violation.DenyingPolicyNamespace),
 		otellog.String("denyingPolicy.name", violation.DenyingPolicyName),
 	)
 
-	r.eventLogger.Emit(ctx, rec)
+	if r.eventLogger != nil {
+		r.eventLogger.Emit(ctx, rec)
+	}
 }
 
 var _ manager.Runnable = (*WorkloadNetworkPolicyStatusSync)(nil)

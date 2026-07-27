@@ -209,7 +209,7 @@ func run(ctx context.Context, logger *slog.Logger, conf *config) error {
 
 	conf.wnpStatusSyncConfig.AgentPoolConf.Logger = logger.With("component", "agent-pool")
 	conf.wnpStatusSyncConfig.EventLogger = eventLogger
-	logger.Info("Setting up WorkloadNetworkPolicyStatusSync with",
+	logger.InfoContext(ctx, "Setting up WorkloadNetworkPolicyStatusSync with",
 		"config", conf.wnpStatusSyncConfig)
 	var wnpStatusSync *controller.WorkloadNetworkPolicyStatusSync
 	if wnpStatusSync, err = controller.NewWorkloadNetworkPolicyStatusSync(
