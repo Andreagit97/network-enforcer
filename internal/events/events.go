@@ -18,6 +18,21 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
+// OTELConfig holds the configuration for the OTLP log exporter.
+type OTELConfig struct {
+	// Endpoint is the OTLP collector endpoint (host:port).
+	Endpoint string
+	// Protocol is the OTLP protocol: "grpc" or "http/protobuf".
+	Protocol string
+	// CACert is the path to the CA certificate for verifying the collector's TLS cert.
+	// Empty means insecure.
+	CACert string
+	// ClientCert is the path to the client TLS certificate for mTLS.
+	ClientCert string
+	// ClientKey is the path to the client TLS key for mTLS.
+	ClientKey string
+}
+
 type protocol string
 
 const (
@@ -124,30 +139,28 @@ func createHTTPExporter(ctx context.Context,
 	return otlploghttp.New(ctx, opts...)
 }
 
-// Init returns an OTLP log logger for the given endpoint.
-// Supported protocol values: grpc, http/protobuf.
-// caCertPath empty = insecure; clientCertPath+clientKeyPath set = mTLS.
+// Init returns an OTLP log logger for the given config.
 // The caller must call shutdown to flush buffered records on exit.
 func Init(
 	ctx context.Context,
-	endpoint, caCertPath, clientCertPath, clientKeyPath, protocol string,
+	cfg OTELConfig,
 ) (otellog.Logger, func(context.Context) error, error) {
 	// Client certs without a CA are silently ignored by the exporters.
 	// Reject the combination up front so users don't think mTLS is active.
-	if caCertPath == "" && (clientCertPath != "" || clientKeyPath != "") {
+	if cfg.CACert == "" && (cfg.ClientCert != "" || cfg.ClientKey != "") {
 		return nil, nil, errors.New("client certificate requires a CA certificate (caCertPath is empty)")
 	}
 
 	var exporter sdklog.Exporter
-	proto, err := stringToProtocol(protocol)
+	proto, err := stringToProtocol(cfg.Protocol)
 	if err != nil {
 		return nil, nil, err
 	}
 	switch proto {
 	case protocolGRPC:
-		exporter, err = createGRPCExporter(ctx, endpoint, caCertPath, clientCertPath, clientKeyPath)
+		exporter, err = createGRPCExporter(ctx, cfg.Endpoint, cfg.CACert, cfg.ClientCert, cfg.ClientKey)
 	case protocolHTTPProtobuf:
-		exporter, err = createHTTPExporter(ctx, endpoint, caCertPath, clientCertPath, clientKeyPath)
+		exporter, err = createHTTPExporter(ctx, cfg.Endpoint, cfg.CACert, cfg.ClientCert, cfg.ClientKey)
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create OTLP log exporter: %w", err)

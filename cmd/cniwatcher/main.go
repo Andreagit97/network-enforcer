@@ -34,10 +34,6 @@ func grpcConfigFromFlags() cniwatcher.GRPCServerConfig {
 
 func newOtelService(ctx context.Context, logger *slog.Logger, grpcConfig cniwatcher.GRPCServerConfig) *otel.Service {
 	otlpEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	if otlpEndpoint == "" {
-		logger.InfoContext(ctx, "OTLP endpoint not set, OpenTelemetry disabled")
-		return nil
-	}
 	otelCfg := otel.OpenTelemetryConfig{
 		Ctx:               ctx,
 		Log:               logger,

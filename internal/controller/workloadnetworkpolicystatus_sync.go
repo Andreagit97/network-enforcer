@@ -347,9 +347,6 @@ func (r *WorkloadNetworkPolicyStatusSync) emitAcknowledgedViolations(
 	ctx context.Context,
 	acknowledgements []securityv1alpha1.AcknowledgedViolationRecord,
 ) {
-	if r.eventLogger == nil {
-		return
-	}
 	for _, ack := range acknowledgements {
 		r.emitAcknowledgedViolationOtelLog(ctx, ack)
 	}
@@ -359,10 +356,6 @@ func (r *WorkloadNetworkPolicyStatusSync) emitAcknowledgedViolationOtelLog(
 	ctx context.Context,
 	ack securityv1alpha1.AcknowledgedViolationRecord,
 ) {
-	if r.eventLogger == nil {
-		return
-	}
-
 	violation := ack.Violation
 	var rec otellog.Record
 	rec.SetEventName(EventNamePolicyViolationAcknowledged)

@@ -57,6 +57,14 @@ const (
 	otlpLogShutdownTimeout = 10 * time.Second
 )
 
+type otelConf struct {
+	Endpoint   string
+	Protocol   string
+	CACert     string
+	ClientCert string
+	ClientKey  string
+}
+
 type config struct {
 	metricsAddr          string
 	metricsCertPath      string
@@ -67,11 +75,7 @@ type config struct {
 	secureMetrics        bool
 	enableHTTP2          bool
 	otlpPort             int
-	otlpLogEndpoint      string
-	otlpLogProtocol      string
-	otlpLogCACert        string
-	otlpLogClientCert    string
-	otlpLogClientKey     string
+	otel                 otelConf
 	drainFlowsInterval   time.Duration
 	tlsOpts              []func(*tls.Config)
 	wnpStatusSyncConfig  controller.WorkloadNetworkPolicyStatusSyncConfig
@@ -121,27 +125,20 @@ func newControllerManager(conf *config) (manager.Manager, error) {
 }
 
 // setupOtelLogExporter initialises the OTLP log exporter and registers
-// its shutdown runnable. Caller must ensure conf.otlpLogEndpoint is set.
+// its shutdown runnable. Caller must ensure conf.otel.Endpoint is set.
 func setupOtelLogExporter(
 	ctx context.Context,
 	logger *slog.Logger,
 	mgr manager.Manager,
-	conf *config,
+	otelCfg events.OTELConfig,
 ) (otellog.Logger, error) {
-	eventLogger, eventShutdown, err := events.Init(
-		ctx,
-		conf.otlpLogEndpoint,
-		conf.otlpLogCACert,
-		conf.otlpLogClientCert,
-		conf.otlpLogClientKey,
-		conf.otlpLogProtocol,
-	)
+	eventLogger, eventShutdown, err := events.Init(ctx, otelCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize OTLP log exporter: %w", err)
 	}
 	logger.InfoContext(ctx, "OTLP violation telemetry enabled",
-		"endpoint", conf.otlpLogEndpoint,
-		"protocol", conf.otlpLogProtocol)
+		"endpoint", otelCfg.Endpoint,
+		"protocol", otelCfg.Protocol)
 
 	err = mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 		<-ctx.Done()
@@ -167,8 +164,15 @@ func run(ctx context.Context, logger *slog.Logger, conf *config) error {
 	}
 
 	var eventLogger otellog.Logger
-	if conf.otlpLogEndpoint != "" {
-		eventLogger, err = setupOtelLogExporter(ctx, logger, mgr, conf)
+	if conf.otel.Endpoint != "" {
+		otelCfg := events.OTELConfig{
+			Endpoint:   conf.otel.Endpoint,
+			Protocol:   conf.otel.Protocol,
+			CACert:     conf.otel.CACert,
+			ClientCert: conf.otel.ClientCert,
+			ClientKey:  conf.otel.ClientKey,
+		}
+		eventLogger, err = setupOtelLogExporter(ctx, logger, mgr, otelCfg)
 		if err != nil {
 			return err
 		}
@@ -253,7 +257,7 @@ func main() {
 	flag.BoolVar(&conf.enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics server")
 	flag.IntVar(&conf.otlpPort, "otlp-port", 4317, "The port the OTLP gRPC receiver listens on.")
-	flag.StringVar(&conf.otlpLogEndpoint, "otlp-log-endpoint",
+	flag.StringVar(&conf.otel.Endpoint, "otlp-log-endpoint",
 		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
 		"OTLP endpoint for the violation-lifecycle log exporter "+
 			"(policy_violation_acknowledged records). Defaults to the "+
@@ -262,20 +266,20 @@ func main() {
 	if otlpLogProtocolDefault == "" {
 		otlpLogProtocolDefault = "grpc"
 	}
-	flag.StringVar(&conf.otlpLogProtocol, "otlp-log-protocol",
+	flag.StringVar(&conf.otel.Protocol, "otlp-log-protocol",
 		otlpLogProtocolDefault,
 		"OTLP protocol for the violation-lifecycle log exporter: grpc or "+
 			"http/protobuf. Defaults to OTEL_EXPORTER_OTLP_PROTOCOL env var or grpc.")
-	flag.StringVar(&conf.otlpLogCACert, "otlp-log-ca-cert",
+	flag.StringVar(&conf.otel.CACert, "otlp-log-ca-cert",
 		os.Getenv("OTEL_EXPORTER_OTLP_CERTIFICATE"),
 		"Path to the CA certificate for verifying the OTLP log collector's "+
 			"TLS certificate. Defaults to the OTEL_EXPORTER_OTLP_CERTIFICATE env "+
 			"var; empty means insecure.")
-	flag.StringVar(&conf.otlpLogClientCert, "otlp-log-client-cert",
+	flag.StringVar(&conf.otel.ClientCert, "otlp-log-client-cert",
 		os.Getenv("OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE"),
 		"Path to the client TLS certificate for mTLS with the OTLP log "+
 			"collector. Defaults to the OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE env var.")
-	flag.StringVar(&conf.otlpLogClientKey, "otlp-log-client-key",
+	flag.StringVar(&conf.otel.ClientKey, "otlp-log-client-key",
 		os.Getenv("OTEL_EXPORTER_OTLP_CLIENT_KEY"),
 		"Path to the client TLS key for mTLS with the OTLP log collector. "+
 			"Defaults to the OTEL_EXPORTER_OTLP_CLIENT_KEY env var.")

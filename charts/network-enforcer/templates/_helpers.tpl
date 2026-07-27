@@ -79,7 +79,31 @@ DNS name of the controller OTLP service; also a SAN on the controller cert.
 {{ include "network-enforcer.fullname" . }}-otlp.{{ .Release.Namespace }}.svc.cluster.local
 {{- end -}}
 
-
+{{/*
+Print the otel environment variable settings.
+*/}}
+{{- define "network-enforcer.otel.config.env" }}
+{{- with .Values.otel }}
+{{- if .endpoint }}
+- name: OTEL_EXPORTER_OTLP_ENDPOINT
+  value: {{ quote .endpoint }}
+- name: OTEL_EXPORTER_OTLP_PROTOCOL
+  value: {{ quote .protocol }}
+{{- if .caCert }}
+- name: OTEL_EXPORTER_OTLP_CERTIFICATE
+  value: {{ quote .caCert }}
+{{- end }}
+{{- if .clientCert }}
+- name: OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE
+  value: {{ quote .clientCert }}
+{{- end }}
+{{- if .clientKey }}
+- name: OTEL_EXPORTER_OTLP_CLIENT_KEY
+  value: {{ quote .clientKey }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
 
 {{/*
 Certificate helpers for cniwatcher mTLS (CA issuer and secret share a name).
