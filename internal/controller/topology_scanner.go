@@ -83,12 +83,18 @@ func getProposalMetadata(
 	}
 }
 
-func (ts *TopologyScanner) proposalLogger(workload *topology.WorkloadKey) *slog.Logger {
+func (ts *TopologyScanner) connectionLogger(
+	workload *topology.WorkloadKey,
+	direction networkingv1.PolicyType,
+) *slog.Logger {
 	return ts.log.With(
-		slog.Group("pod",
-			"name", workload.OwnerName,
-			"kind", workload.OwnerKind,
-			"namespace", workload.Namespace,
+		slog.Group("connection",
+			slog.Group("workload",
+				"name", workload.OwnerName,
+				"kind", workload.OwnerKind,
+				"namespace", workload.Namespace,
+			),
+			"direction", direction,
 		),
 	)
 }
@@ -99,12 +105,10 @@ func (ts *TopologyScanner) reconcileConnections(
 	direction networkingv1.PolicyType,
 ) {
 	for workload, peers := range connections {
-		ts.proposalLogger(&workload).InfoContext(ctx, "Reconciling proposal",
-			"direction", direction,
+		ts.connectionLogger(&workload, direction).InfoContext(ctx, "Reconciling connection",
 			"peers", len(peers))
 		if err := ts.reconcileProposal(ctx, workload, direction, peers); err != nil {
-			ts.proposalLogger(&workload).WarnContext(ctx, "Could not reconcile proposal",
-				"direction", direction,
+			ts.connectionLogger(&workload, direction).WarnContext(ctx, "Could not reconcile connection",
 				"error", err)
 		}
 	}
