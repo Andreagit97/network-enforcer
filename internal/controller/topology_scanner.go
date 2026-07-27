@@ -83,6 +83,16 @@ func getProposalMetadata(
 	}
 }
 
+func (ts *TopologyScanner) proposalLogger(workload *topology.WorkloadKey) *slog.Logger {
+	return ts.log.With(
+		slog.Group("pod",
+			"name", workload.OwnerName,
+			"kind", workload.OwnerKind,
+			"namespace", workload.Namespace,
+		),
+	)
+}
+
 func (ts *TopologyScanner) scan(ctx context.Context) {
 	// todo!: it would be nice to drain only connections that are correctly reconciled.
 	// at the moment we just log a warning and we drop the connection.
@@ -97,60 +107,16 @@ func (ts *TopologyScanner) scan(ctx context.Context) {
 		len(connections.Ingress),
 	)
 	for workload, peers := range connections.Egress {
-		ts.log.InfoContext(
-			ctx,
-			"Reconciling egress proposal",
-			"namespace",
-			workload.Namespace,
-			"kind",
-			workload.OwnerKind,
-			"name",
-			workload.OwnerName,
-			"peers",
-			len(peers),
-		)
+		ts.proposalLogger(&workload).InfoContext(ctx, "Reconciling egress proposal", "peers", len(peers))
 		if err := ts.reconcileProposal(ctx, workload, networkingv1.PolicyTypeEgress, peers); err != nil {
-			ts.log.WarnContext(
-				ctx,
-				"Could not reconcile egress proposal",
-				"namespace",
-				workload.Namespace,
-				"kind",
-				workload.OwnerKind,
-				"name",
-				workload.OwnerName,
-				"error",
-				err,
-			)
+			ts.proposalLogger(&workload).WarnContext(ctx, "Could not reconcile egress proposal", "error", err)
 		}
 	}
 
 	for workload, peers := range connections.Ingress {
-		ts.log.InfoContext(
-			ctx,
-			"Reconciling ingress proposal",
-			"namespace",
-			workload.Namespace,
-			"kind",
-			workload.OwnerKind,
-			"name",
-			workload.OwnerName,
-			"peers",
-			len(peers),
-		)
+		ts.proposalLogger(&workload).InfoContext(ctx, "Reconciling ingress proposal", "peers", len(peers))
 		if err := ts.reconcileProposal(ctx, workload, networkingv1.PolicyTypeIngress, peers); err != nil {
-			ts.log.WarnContext(
-				ctx,
-				"Could not reconcile ingress proposal",
-				"namespace",
-				workload.Namespace,
-				"kind",
-				workload.OwnerKind,
-				"name",
-				workload.OwnerName,
-				"error",
-				err,
-			)
+			ts.proposalLogger(&workload).WarnContext(ctx, "Could not reconcile ingress proposal", "error", err)
 		}
 	}
 }
