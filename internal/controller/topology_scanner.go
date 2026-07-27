@@ -99,6 +99,69 @@ func (ts *TopologyScanner) connectionLogger(
 	)
 }
 
+func (ts *TopologyScanner) updateProposal(
+	ctx context.Context,
+	workload topology.WorkloadKey,
+	direction networkingv1.PolicyType,
+	peers sets.Set[topology.Peer],
+) error {
+	proposal := getProposalMetadata(workload, direction)
+	if _, err := controllerutil.CreateOrUpdate(ctx, ts.client, proposal, func() error {
+		// we recompute the selector only if we are creating the resource the first time.
+		// we could continuously recompute the selector if we want to keep track of updates.
+		// the policyTypes should be empty only when the resource is new.
+		if len(proposal.Spec.PolicyTypes) == 0 {
+			workloadSelector, err := selectorFromWorkloadKey(ctx, ts.client, workload)
+			if err != nil {
+				return fmt.Errorf("resolving workload selector: %w", err)
+			}
+			proposal.Spec.PodSelector = workloadSelector
+			proposal.Spec.PolicyTypes = []networkingv1.PolicyType{direction}
+		}
+		return ts.buildSpec(ctx, direction, &proposal.Spec, peers)
+	}); err != nil {
+		return fmt.Errorf("create or update proposal %s/%s: %w", proposal.Namespace, proposal.Name, err)
+	}
+	return nil
+}
+
+func (ts *TopologyScanner) reconcileConnection(
+	ctx context.Context,
+	workload topology.WorkloadKey,
+	direction networkingv1.PolicyType,
+	peers sets.Set[topology.Peer],
+) error {
+	if peers.Len() == 0 {
+		return errors.New("no peers associated to the workload")
+	}
+
+	// we first check if we already have a policy associated to the workload.
+	// we use the promoted label to associate the policy with the proposal.
+	policies, err := checkExistingPolicy(ctx, ts.client, workload.Namespace, getProposalName(workload, direction))
+	if err != nil {
+		return errors.New("could not check existing policies")
+	}
+
+	switch len(policies) {
+	case 0:
+		// no policy associated with the proposal
+		return ts.updateProposal(ctx, workload, direction, peers)
+	case 1:
+		// we have just one policy
+		policy := policies[0]
+		// we check the mode
+		if policy.Spec.Mode == securityv1alpha1.WorkloadNetworkPolicyModeProtect {
+			// we do nothing, the violation are reported by the cni
+			return nil
+		}
+		// we are in monitor mode we need to report violations
+		// todo!: for now we just return nil
+		return nil
+	default:
+		return errors.New("multiple policies associated with the same proposal")
+	}
+}
+
 func (ts *TopologyScanner) reconcileConnections(
 	ctx context.Context,
 	connections map[topology.WorkloadKey]sets.Set[topology.Peer],
@@ -107,7 +170,7 @@ func (ts *TopologyScanner) reconcileConnections(
 	for workload, peers := range connections {
 		ts.connectionLogger(&workload, direction).InfoContext(ctx, "Reconciling connection",
 			"peers", len(peers))
-		if err := ts.reconcileProposal(ctx, workload, direction, peers); err != nil {
+		if err := ts.reconcileConnection(ctx, workload, direction, peers); err != nil {
 			ts.connectionLogger(&workload, direction).WarnContext(ctx, "Could not reconcile connection",
 				"error", err)
 		}
@@ -129,46 +192,6 @@ func (ts *TopologyScanner) scan(ctx context.Context) {
 	)
 	ts.reconcileConnections(ctx, connections.Egress, networkingv1.PolicyTypeEgress)
 	ts.reconcileConnections(ctx, connections.Ingress, networkingv1.PolicyTypeIngress)
-}
-
-func (ts *TopologyScanner) reconcileProposal(
-	ctx context.Context,
-	workload topology.WorkloadKey,
-	direction networkingv1.PolicyType,
-	deltaPeers sets.Set[topology.Peer],
-) error {
-	if deltaPeers == nil || deltaPeers.Len() == 0 {
-		return errors.New("no peers associated to the workload")
-	}
-	proposal := getProposalMetadata(workload, direction)
-
-	alreadyPromoted, err := hasPromotedPolicy(ctx, ts.client, proposal.Namespace, proposal.Name)
-	if err != nil {
-		return fmt.Errorf("checking promoted policy for proposal %s/%s: %w", proposal.Namespace, proposal.Name, err)
-	}
-	if alreadyPromoted {
-		return nil
-	}
-
-	if _, err = controllerutil.CreateOrUpdate(ctx, ts.client, proposal, func() error {
-		// we recompute the selector only if we are creating the resource the first time.
-		// we could continuously recompute the selector if we want to keep track of updates.
-		// the policyTypes should be empty only when the resource is new.
-		if len(proposal.Spec.PolicyTypes) == 0 {
-			var workloadSelector metav1.LabelSelector
-			workloadSelector, err = selectorFromWorkloadKey(ctx, ts.client, workload)
-			if err != nil {
-				return fmt.Errorf("resolving workload selector: %w", err)
-			}
-			proposal.Spec.PodSelector = workloadSelector
-			proposal.Spec.PolicyTypes = []networkingv1.PolicyType{direction}
-		}
-		return ts.buildSpec(ctx, direction, &proposal.Spec, deltaPeers)
-	}); err != nil {
-		return fmt.Errorf("create or update proposal %s/%s: %w", proposal.Namespace, proposal.Name, err)
-	}
-
-	return nil
 }
 
 func containsRule[T any](newRule T, existing []T, equalFn func(T, T) bool) bool {
