@@ -129,6 +129,87 @@ func (ts *TopologyScanner) updateProposal(
 	return nil
 }
 
+func (ts *TopologyScanner) sendMonitorViolations(
+	ctx context.Context,
+	workload topology.WorkloadKey,
+	policy *securityv1alpha1.WorkloadNetworkPolicy,
+	direction networkingv1.PolicyType,
+	peers sets.Set[topology.Peer],
+) error {
+	violations, err := ts.getMonitorViolations(ctx, workload, policy, direction, peers)
+	if err != nil {
+		return err
+	}
+
+	for _, violation := range violations {
+		if !ts.monitorViolationBuffer.Record(violation) {
+			ts.log.WarnContext(ctx, "Monitor violation not recorded", "violation", violation)
+		}
+	}
+
+	// todo!: send each violation through otel
+
+	return nil
+}
+
+func newViolationRecord(
+	workload topology.WorkloadKey,
+	policyName string,
+	direction networkingv1.PolicyType,
+	peer topology.Peer,
+) violationbuf.ViolationRecord {
+	return violationbuf.ViolationRecord{
+		Timestamp:              time.Now(),
+		NodeName:               "", // we don't populate it at the moment, since we don't really need it.
+		Direction:              string(direction),
+		SrcNamespace:           workload.Namespace,
+		SrcName:                workload.OwnerName,
+		DstNamespace:           peer.Namespace,
+		DstName:                peer.OwnerName,
+		Protocol:               peer.Protocol,
+		DstPort:                peer.DstPort,
+		Action:                 securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
+		DenyingPolicyNamespace: workload.Namespace,
+		DenyingPolicyName:      policyName,
+	}
+}
+
+func (ts *TopologyScanner) getMonitorViolations(
+	ctx context.Context,
+	workload topology.WorkloadKey,
+	policy *securityv1alpha1.WorkloadNetworkPolicy,
+	direction networkingv1.PolicyType,
+	peers sets.Set[topology.Peer],
+) ([]violationbuf.ViolationRecord, error) {
+	var violations []violationbuf.ViolationRecord
+	switch direction {
+	case networkingv1.PolicyTypeEgress:
+		for _, peer := range peers.UnsortedList() {
+			rule, err := ts.buildEgressRuleFromPeer(ctx, peer)
+			if err != nil {
+				return nil, fmt.Errorf("resolving egress peer selector: %w", err)
+			}
+			if !containsRule(rule, policy.Spec.PolicyTemplate.Egress, securityv1alpha1.EgressRuleEqual) {
+				violations = append(violations, newViolationRecord(workload, policy.Name, direction, peer))
+			}
+		}
+	case networkingv1.PolicyTypeIngress:
+		for _, peer := range peers.UnsortedList() {
+			rule, err := ts.buildIngressRuleFromPeer(ctx, peer)
+			if err != nil {
+				return nil, fmt.Errorf("resolving ingress peer selector: %w", err)
+			}
+
+			if !containsRule(rule, policy.Spec.PolicyTemplate.Ingress, securityv1alpha1.IngressRuleEqual) {
+				violations = append(violations, newViolationRecord(workload, policy.Name, direction, peer))
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unknown direction: %s", direction)
+	}
+	return violations, nil
+}
+
 func (ts *TopologyScanner) reconcileConnection(
 	ctx context.Context,
 	workload topology.WorkloadKey,
@@ -159,8 +240,7 @@ func (ts *TopologyScanner) reconcileConnection(
 			return nil
 		}
 		// we are in monitor mode we need to report violations
-		// todo!: for now we just return nil
-		return nil
+		return ts.sendMonitorViolations(ctx, workload, &policy, direction, peers)
 	default:
 		return errors.New("multiple policies associated with the same proposal")
 	}
