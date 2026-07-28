@@ -18,6 +18,7 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/topology"
+	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
 )
 
 // +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets;daemonsets,verbs=get;list;watch
@@ -26,10 +27,11 @@ import (
 // +kubebuilder:rbac:groups=security.rancher.io,resources=workloadnetworkpolicies,verbs=get;list;watch
 
 type TopologyScanner struct {
-	client   client.Client
-	store    *topology.Store
-	log      *slog.Logger
-	interval time.Duration
+	client                 client.Client
+	store                  *topology.Store
+	log                    *slog.Logger
+	interval               time.Duration
+	monitorViolationBuffer *violationbuf.Buffer
 }
 
 func NewTopologyScanner(
@@ -37,12 +39,14 @@ func NewTopologyScanner(
 	store *topology.Store,
 	logger *slog.Logger,
 	drainInterval time.Duration,
+	violationBuffer *violationbuf.Buffer,
 ) *TopologyScanner {
 	return &TopologyScanner{
-		client:   c,
-		store:    store,
-		log:      logger.With("component", "topology-scanner"),
-		interval: drainInterval,
+		client:                 c,
+		store:                  store,
+		log:                    logger.With("component", "topology-scanner"),
+		interval:               drainInterval,
+		monitorViolationBuffer: violationBuffer,
 	}
 }
 
