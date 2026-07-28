@@ -55,15 +55,15 @@ func TestDropByPolicyRegexFieldExtraction(t *testing.T) {
 			},
 		},
 		{
-			name:        "ICMP without ports",
-			logLine:     "Mar 10 16:45:30 master DROP by policy my-namespace/test_policy IN=flannel.1 OUT= MAC=12:34:56:78:9a:bc:de:f0:12:34:56:78:9a:bc SRC=172.16.0.50 DST=172.16.0.100 LEN=84 TOS=0x00 PREC=0x00 TTL=64 ID=0 DF PROTO=ICMP TYPE=8 CODE=0 ID=1234 SEQ=1",
+			name:        "UDP without ports",
+			logLine:     "Mar 10 16:45:30 master DROP by policy my-namespace/test_policy IN=flannel.1 OUT= MAC=12:34:56:78:9a:bc:de:f0:12:34:56:78:9a:bc SRC=172.16.0.50 DST=172.16.0.100 LEN=84 TOS=0x00 PREC=0x00 TTL=64 ID=0 DF PROTO=UDP LEN=64",
 			shouldMatch: true,
 			expectedFields: map[string]string{
 				"timestamp": "Mar 10 16:45:30",
 				"policy":    "my-namespace/test_policy",
 				"srcip":     "172.16.0.50",
 				"dstip":     "172.16.0.100",
-				"proto":     "ICMP",
+				"proto":     "UDP",
 				"srcport":   "",
 				"dstport":   "",
 			},

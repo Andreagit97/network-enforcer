@@ -44,9 +44,9 @@ type ViolationRecord struct {
 	DestName      string   `protobuf:"bytes,9,opt,name=dest_name,json=destName,proto3" json:"dest_name,omitempty"`
 	DestWorkloads []string `protobuf:"bytes,10,rep,name=dest_workloads,json=destWorkloads,proto3" json:"dest_workloads,omitempty"`
 	DestLabels    []string `protobuf:"bytes,11,rep,name=dest_labels,json=destLabels,proto3" json:"dest_labels,omitempty"`
-	// L4 protocol: "TCP", "UDP", "ICMP", "SCTP".
+	// L4 protocol: "TCP", "UDP".
 	Protocol string `protobuf:"bytes,12,opt,name=protocol,proto3" json:"protocol,omitempty"`
-	// Destination port. 0 when unavailable (e.g. ICMP, or backends that don't expose it).
+	// Destination port. 0 when unavailable (e.g. backends that don't expose it).
 	DstPort int32 `protobuf:"varint,13,opt,name=dst_port,json=dstPort,proto3" json:"dst_port,omitempty"`
 	// Action is always "protect" (only protect mode produces denies).
 	Action string `protobuf:"bytes,14,opt,name=action,proto3" json:"action,omitempty"`

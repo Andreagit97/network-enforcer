@@ -630,7 +630,7 @@ spec:
                             the violation.
                           type: string
                         protocol:
-                          description: Protocol is the L4 protocol (TCP, UDP, SCTP).
+                          description: Protocol is the L4 protocol (TCP, UDP).
                           type: string
                         source:
                           description: Source is the workload that initiated the traffic.
@@ -759,7 +759,7 @@ spec:
                         the violation.
                       type: string
                     protocol:
-                      description: Protocol is the L4 protocol (TCP, UDP, SCTP).
+                      description: Protocol is the L4 protocol (TCP, UDP).
                       type: string
                     source:
                       description: Source is the workload that initiated the traffic.
