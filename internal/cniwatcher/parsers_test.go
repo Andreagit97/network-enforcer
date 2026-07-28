@@ -9,8 +9,10 @@ import (
 	hubbleObserver "github.com/cilium/cilium/api/v1/observer"
 	monitorApi "github.com/cilium/cilium/pkg/monitor/api"
 	pb "github.com/rancher-sandbox/network-enforcer/internal/cniwatcher/calico/goldmane"
+	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -92,10 +94,11 @@ func TestCiliumParsePolicyDenyEvent_DstPort(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		flow     *hubbleObserver.GetFlowsResponse
-		wantPort int32
-		wantErr  bool
+		name         string
+		flow         *hubbleObserver.GetFlowsResponse
+		wantPort     int32
+		wantProtocol corev1.Protocol
+		wantErr      bool
 	}{
 		{
 			name: "TCP flow with destination port 443",
@@ -116,8 +119,9 @@ func TestCiliumParsePolicyDenyEvent_DstPort(t *testing.T) {
 					},
 				},
 			},
-			wantPort: 443,
-			wantErr:  false,
+			wantPort:     443,
+			wantProtocol: corev1.ProtocolTCP,
+			wantErr:      false,
 		},
 		{
 			name: "UDP flow with destination port 53",
@@ -138,11 +142,12 @@ func TestCiliumParsePolicyDenyEvent_DstPort(t *testing.T) {
 					},
 				},
 			},
-			wantPort: 53,
-			wantErr:  false,
+			wantPort:     53,
+			wantProtocol: corev1.ProtocolUDP,
+			wantErr:      false,
 		},
 		{
-			name: "ICMP flow has no port (0)",
+			name: "unsupported L4 protocol has no port (0)",
 			flow: &hubbleObserver.GetFlowsResponse{
 				ResponseTypes: &hubbleObserver.GetFlowsResponse_Flow{
 					Flow: &flowpb.Flow{
@@ -158,8 +163,9 @@ func TestCiliumParsePolicyDenyEvent_DstPort(t *testing.T) {
 					},
 				},
 			},
-			wantPort: 0,
-			wantErr:  false,
+			wantPort:     0,
+			wantProtocol: corev1.Protocol(types.ProtocolUnknown),
+			wantErr:      false,
 		},
 		{
 			name: "TCP flow with drop reason POLICY_DENY treated as deny",
@@ -180,8 +186,9 @@ func TestCiliumParsePolicyDenyEvent_DstPort(t *testing.T) {
 					},
 				},
 			},
-			wantPort: 8080,
-			wantErr:  false,
+			wantPort:     8080,
+			wantProtocol: corev1.ProtocolTCP,
+			wantErr:      false,
 		},
 	}
 
@@ -194,6 +201,7 @@ func TestCiliumParsePolicyDenyEvent_DstPort(t *testing.T) {
 			}
 			require.NotNil(t, event, "expected a PolicyDenyEvent, got nil")
 			assert.Equal(t, tt.wantPort, event.DstPort)
+			assert.Equal(t, tt.wantProtocol, event.Protocol)
 		})
 	}
 }

@@ -169,11 +169,6 @@ func (w *CiliumWatcher) parsePolicyDenyEvent(
 		case *flowpb.Layer4_UDP:
 			proto = string(types.ProtocolUDP)
 			dstPort = int32(l4.GetUDP().GetDestinationPort()) //nolint:gosec // port 0-65535 fits int32
-		case *flowpb.Layer4_ICMPv4, *flowpb.Layer4_ICMPv6:
-			proto = string(types.ProtocolICMP)
-		case *flowpb.Layer4_SCTP:
-			proto = string(types.ProtocolSCTP)
-			dstPort = int32(l4.GetSCTP().GetDestinationPort()) //nolint:gosec // port 0-65535 fits int32
 		default:
 			proto = string(types.ProtocolUnknown)
 		}

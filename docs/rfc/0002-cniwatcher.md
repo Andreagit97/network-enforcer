@@ -189,7 +189,7 @@ The Cilium watcher connects to the Hubble API endpoint and streams policy verdic
 - **Data Extraction**: Extracts detailed metadata including:
   - Source/destination namespaces, pod names, and labels
   - Source/destination workload information
-  - Protocol details (TCP, UDP, ICMP, SCTP)
+  - Protocol details (TCP, UDP)
   - Port information
   - Policy references that caused the denial
 - **ingressDeny Example**:
@@ -260,7 +260,7 @@ type PolicyDenyEvent struct {
 	NodeName  string `json:"node_name"`
 	// e.g. "aws-vpc", "calico", "cilium", "flannel"
 	CNIType string `json:"cni_type"`
-	// "TCP", "UDP", "ICMP", "SCTP"
+	// "TCP", "UDP"
 	Protocol     corev1.Protocol `json:"protocol"`
 	SrcNamespace string          `json:"source_namespace"`
 	SrcName      string          `json:"source_name"`

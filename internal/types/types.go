@@ -33,8 +33,6 @@ type Protocol string
 const (
 	ProtocolTCP     Protocol = "TCP"
 	ProtocolUDP     Protocol = "UDP"
-	ProtocolICMP    Protocol = "ICMP"
-	ProtocolSCTP    Protocol = "SCTP"
 	ProtocolUnknown Protocol = "Unknown"
 )
 
@@ -57,7 +55,7 @@ type PolicyDenyEvent struct {
 	NodeName  string `json:"node_name"`
 	// e.g. "aws-vpc", "calico", "cilium", "flannel"
 	CNIType string `json:"cni_type"`
-	// "TCP", "UDP", "ICMP", "SCTP"
+	// "TCP", "UDP"
 	Protocol     corev1.Protocol `json:"protocol"`
 	SrcNamespace string          `json:"source_namespace"`
 	SrcName      string          `json:"source_name"`
@@ -67,7 +65,7 @@ type PolicyDenyEvent struct {
 	DstLabels    []string        `json:"destination_labels"`
 	SrcWorkloads []string        `json:"source_workloads,omitempty"`
 	DstWorkloads []string        `json:"destination_workloads,omitempty"`
-	// Destination port. 0 when unavailable (e.g. ICMP, or backends that don't expose it).
+	// Destination port. 0 when unavailable (e.g. backends that don't expose it).
 	// Calico and Cilium parsers populate this from their flow results.
 	DstPort int32 `json:"dst_port,omitempty"`
 	// The K8s NetworkPolicies or CiliumNetworkPolicies denying the egress of the flow

@@ -33,9 +33,9 @@ message ViolationRecord {
   repeated string dest_workloads = 10;
   repeated string dest_labels = 11;
 
-  // L4 protocol: "TCP", "UDP", "ICMP", "SCTP".
+  // L4 protocol: "TCP", "UDP".
   string protocol = 12;
-  // Destination port. 0 when unavailable (e.g. ICMP, or backends that don't expose it).
+  // Destination port. 0 when unavailable (e.g. backends that don't expose it).
   int32 dst_port = 13;
   // Action is always "protect" (only protect mode produces denies).
   string action = 14;

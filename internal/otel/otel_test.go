@@ -122,7 +122,7 @@ func TestOtelService_EmitPolicyDenyEvent(t *testing.T) {
 				Timestamp:    ts.Unix(),
 				NodeName:     "node-1",
 				CNIType:      "flannel",
-				Protocol:     "ICMP",
+				Protocol:     "TCP",
 				SrcNamespace: "src-ns",
 				SrcName:      "src-pod",
 				DstNamespace: "dst-ns",
@@ -130,7 +130,7 @@ func TestOtelService_EmitPolicyDenyEvent(t *testing.T) {
 			},
 			wantAttributes: []otellog.KeyValue{
 				otellog.String("cni.type", "flannel"),
-				otellog.String("network.protocol", "ICMP"),
+				otellog.String("network.protocol", "TCP"),
 				otellog.String("node.name", "node-1"),
 				otellog.String("source.namespace", "src-ns"),
 				otellog.String("source.name", "src-pod"),
