@@ -19,6 +19,7 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/grpcexporter"
+	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
 	agentv1 "github.com/rancher-sandbox/network-enforcer/proto/agent/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -669,10 +670,11 @@ func TestSyncClearsViolationsWithNoNewScrapedViolations(t *testing.T) {
 	pool := &fakePool{nodeClients: map[string]grpcexporter.AgentClientAPI{}}
 
 	sync := &WorkloadNetworkPolicyStatusSync{
-		Client:          fakeClient,
-		agentClientPool: pool,
-		updateInterval:  time.Hour,
-		logger:          ctrl.Log.WithName("test"),
+		Client:                 fakeClient,
+		agentClientPool:        pool,
+		updateInterval:         time.Hour,
+		logger:                 ctrl.Log.WithName("test"),
+		monitorViolationBuffer: violationbuf.NewBuffer(),
 	}
 
 	err := sync.sync(context.Background())

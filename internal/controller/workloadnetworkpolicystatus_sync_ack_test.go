@@ -13,10 +13,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
+	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
 )
 
 type fakeEventLogger struct {
@@ -113,6 +115,26 @@ func ackTestViolation(denyingPolicyName string) securityv1alpha1.ViolationRecord
 	}
 }
 
+func newTestWorkloadNetworkStatusSync(client client.Client) *WorkloadNetworkPolicyStatusSync {
+	return &WorkloadNetworkPolicyStatusSync{
+		Client:                 client,
+		agentClientPool:        &fakePool{},
+		updateInterval:         time.Hour,
+		eventLogger:            &fakeEventLogger{},
+		logger:                 ctrl.Log.WithName("test"),
+		monitorViolationBuffer: violationbuf.NewBuffer(),
+	}
+}
+
+func (r *WorkloadNetworkPolicyStatusSync) withLogger(logger otellog.Logger) *WorkloadNetworkPolicyStatusSync {
+	r.eventLogger = logger
+	return r
+}
+
+func (r *WorkloadNetworkPolicyStatusSync) getOtelLogger() *fakeEventLogger {
+	return r.eventLogger.(*fakeEventLogger)
+}
+
 // TestAcknowledgedViolationEmitOrderingGuard verifies the ordering guard:
 // status patch failure → no log; retry after success → exactly one log.
 func TestAcknowledgedViolationEmitOrderingGuard(t *testing.T) {
@@ -129,15 +151,8 @@ func TestAcknowledgedViolationEmitOrderingGuard(t *testing.T) {
 		Build()
 
 	failingClient := &statusFailingClient{Client: inner, failN: 1}
-
-	logger := &fakeEventLogger{}
-
-	sync := &WorkloadNetworkPolicyStatusSync{
-		Client:          failingClient,
-		agentClientPool: &fakePool{},
-		updateInterval:  time.Hour,
-		eventLogger:     logger,
-	}
+	sync := newTestWorkloadNetworkStatusSync(failingClient)
+	logger := sync.getOtelLogger()
 
 	violations := []securityv1alpha1.ViolationRecord{ackTestViolation("ack-policy")}
 
@@ -166,14 +181,8 @@ func TestAcknowledgedViolationEventShape(t *testing.T) {
 		WithObjects(wnp, ownedNP).
 		Build()
 
-	logger := &fakeEventLogger{}
-
-	sync := &WorkloadNetworkPolicyStatusSync{
-		Client:          inner,
-		agentClientPool: &fakePool{},
-		updateInterval:  time.Hour,
-		eventLogger:     logger,
-	}
+	sync := newTestWorkloadNetworkStatusSync(inner)
+	logger := sync.getOtelLogger()
 
 	require.NoError(t, sync.processWorkloadNetworkPolicy(context.Background(),
 		wnpWithAckAnnotation("shape-policy"),
@@ -221,12 +230,8 @@ func TestAcknowledgedViolationEmitNoLoggerIsNoOp(t *testing.T) {
 		WithObjects(wnp, ownedNP).
 		Build()
 
-	sync := &WorkloadNetworkPolicyStatusSync{
-		Client:          inner,
-		agentClientPool: &fakePool{},
-		updateInterval:  time.Hour,
-		// eventLogger intentionally nil → OTLP disabled.
-	}
+	// eventLogger intentionally nil → OTLP disabled.
+	sync := newTestWorkloadNetworkStatusSync(inner).withLogger(nil)
 
 	require.NoError(t, sync.processWorkloadNetworkPolicy(context.Background(),
 		wnpWithAckAnnotation("noop-policy"),
