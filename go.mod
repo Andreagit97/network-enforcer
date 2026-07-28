@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	github.com/cilium/cilium v1.19.6
-	github.com/go-logr/logr v1.4.3
+	github.com/go-logr/logr v1.4.4
 	github.com/jdrews/go-tailer v1.2.1
 	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.11.1
