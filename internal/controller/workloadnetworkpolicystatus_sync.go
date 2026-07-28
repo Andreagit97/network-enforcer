@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,7 +12,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -160,7 +160,7 @@ func (r *WorkloadNetworkPolicyStatusSync) sync(ctx context.Context) error {
 	monitorViolation := convertMonitorViolations(r.monitorViolationBuffer.Drain())
 	scraped = append(scraped, monitorViolation...)
 	// Group scraped violations by the owning WNP
-	violationsByWNP := r.correlateViolationsToWNPs(ctx, scraped, ownedIndex)
+	violationsByWNP := r.correlateViolationsToWNPs(scraped, ownedIndex, wnpByKey)
 
 	// Process every WNP: those with scraped violations get them merged;
 	// those without still get clearAllowedViolations + acknowledgeViolationsFromAnnotations.
@@ -178,7 +178,7 @@ func (r *WorkloadNetworkPolicyStatusSync) sync(ctx context.Context) error {
 func (r *WorkloadNetworkPolicyStatusSync) buildOwnershipIndex(
 	ctx context.Context,
 	wnpByKey map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy,
-) (map[types.NamespacedName]types.NamespacedName, error) {
+) (map[types.NamespacedName]*types.NamespacedName, error) {
 	var npList networkingv1.NetworkPolicyList
 	if err := r.List(ctx, &npList); err != nil {
 		return nil, fmt.Errorf("failed to list NetworkPolicies: %w", err)
@@ -187,13 +187,16 @@ func (r *WorkloadNetworkPolicyStatusSync) buildOwnershipIndex(
 	apiVersion := securityv1alpha1.GroupVersion.String()
 	wnpKind := "WorkloadNetworkPolicy"
 
-	index := make(map[types.NamespacedName]types.NamespacedName, len(npList.Items))
+	index := make(map[types.NamespacedName]*types.NamespacedName, len(npList.Items))
 	for _, np := range npList.Items {
 		npKey := types.NamespacedName{Namespace: np.Namespace, Name: np.Name}
 		if wnpKey, ok := findWNPOwnerRef(
 			np.OwnerReferences, np.Namespace, apiVersion, wnpKind, wnpByKey,
 		); ok {
-			index[npKey] = wnpKey
+			index[npKey] = &wnpKey
+		} else {
+			// we store a nil pointer to indicate no owner
+			index[npKey] = nil
 		}
 	}
 	return index, nil
@@ -249,44 +252,49 @@ func (r *WorkloadNetworkPolicyStatusSync) scrapeAllNodes(
 // correlateViolationsToWNPs groups scraped violations by the owning WNP.
 // Violations with no owning WNP are dropped; deleted denying NetPols log a warning.
 func (r *WorkloadNetworkPolicyStatusSync) correlateViolationsToWNPs(
-	ctx context.Context,
 	scraped []*agentv1.ViolationRecord,
-	ownedIndex map[types.NamespacedName]types.NamespacedName,
+	ownedIndex map[types.NamespacedName]*types.NamespacedName,
+	wnpByKey map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy,
 ) map[types.NamespacedName][]securityv1alpha1.ViolationRecord {
 	result := make(map[types.NamespacedName][]securityv1alpha1.ViolationRecord)
-	missingChecked := make(map[types.NamespacedName]struct{})
 
 	for _, v := range scraped {
-		npKey := types.NamespacedName{
+		// the k8s network policy should have the same name of the
+		// workload network policy.
+		wnpKey := types.NamespacedName{
 			Namespace: v.GetDenyingPolicyNamespace(),
 			Name:      v.GetDenyingPolicyName(),
 		}
 
-		// Scenario 1: NetworkPolicy exists and is owned by a WNP.
-		if wnpKey, ok := ownedIndex[npKey]; ok {
-			rec := convertProtoViolation(v)
-			result[wnpKey] = append(result[wnpKey], rec)
+		// if we don't find a WNP, we can't correlate the violation and so we log a warning
+		if _, ok := wnpByKey[wnpKey]; !ok {
+			r.logger.Info(
+				"Denying WorkloadNetworkPolicy not found; violation may be caused by a policy not managed by us",
+				"denyingPolicy",
+				wnpKey.String(),
+			)
 			continue
 		}
 
-		// Scenarios 2 & 3: NP not in ownership index.
-		if npKey.Name == "" {
+		// In protect mode it is possible that a k8s network policy has the same name of one of our WNPs
+		// but it is not owned by us. if it is the case we should already have some errors when we try
+		// to create the WNPs but we check also here to avoid wrong violation assignment
+		owner, ok := ownedIndex[wnpKey]
+		if ok && owner == nil {
+			// we have an error only in case of policy presence and without owner
+			r.logger.Error(
+				errors.New(
+					"found a Network policy with same name of WNP but not managed by us, cannot register violation",
+				),
+				// todo!: we should use slog.Logger here to be compliant with the repo and to avoid this duplication.
+				"found a Network policy with same name of WNP but not managed by us, cannot register violation",
+				"denyingPolicy",
+				wnpKey.String(),
+			)
 			continue
 		}
-		if _, seen := missingChecked[npKey]; seen {
-			continue
-		}
-		missingChecked[npKey] = struct{}{}
 
-		// Scenario 2: NetworkPolicy was deleted — log a warning.
-		// Scenario 3: NetworkPolicy exists but isn't ours — do nothing.
-		var np networkingv1.NetworkPolicy
-		if err := r.Get(ctx, npKey, &np); err != nil {
-			if apierrors.IsNotFound(err) {
-				r.logger.Info("Denying NetworkPolicy not found; violation may be orphaned",
-					"networkPolicy", npKey.String())
-			}
-		}
+		result[wnpKey] = append(result[wnpKey], convertProtoViolation(v))
 	}
 
 	return result

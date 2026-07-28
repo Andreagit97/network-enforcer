@@ -121,8 +121,16 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 
 	npKey := types.NamespacedName{Namespace: "ns1", Name: "policy-1"}
 	wnpKey := types.NamespacedName{Namespace: "ns1", Name: "policy-1"}
-	ownedIndex := map[types.NamespacedName]types.NamespacedName{
-		npKey: wnpKey,
+	ownedIndex := map[types.NamespacedName]*types.NamespacedName{
+		npKey: &wnpKey,
+	}
+	wnpByKey := map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy{
+		wnpKey: {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      wnpKey.Name,
+				Namespace: wnpKey.Namespace,
+			},
+		},
 	}
 
 	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -232,7 +240,7 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := tt.sync.correlateViolationsToWNPs(context.Background(), tt.violations, ownedIndex)
+			result := tt.sync.correlateViolationsToWNPs(tt.violations, ownedIndex, wnpByKey)
 			tt.check(t, result)
 		})
 	}
@@ -381,13 +389,14 @@ func TestBuildOwnershipIndex(t *testing.T) {
 
 	// Owned policies should be in the index.
 	require.Equal(t, types.NamespacedName{Namespace: "ns1", Name: "policy-1"},
-		index[types.NamespacedName{Namespace: "ns1", Name: "policy-1"}])
+		*index[types.NamespacedName{Namespace: "ns1", Name: "policy-1"}])
 	require.Equal(t, types.NamespacedName{Namespace: "ns2", Name: "policy-2"},
-		index[types.NamespacedName{Namespace: "ns2", Name: "policy-2"}])
+		*index[types.NamespacedName{Namespace: "ns2", Name: "policy-2"}])
 
-	// Unowned policy should not be in the index.
-	_, exists := index[types.NamespacedName{Namespace: "ns1", Name: "raw-policy"}]
-	require.False(t, exists)
+	// Unowned policy should be in the index but the owner should be nil
+	owner, exists := index[types.NamespacedName{Namespace: "ns1", Name: "raw-policy"}]
+	require.True(t, exists)
+	require.Nil(t, owner)
 }
 
 func TestConvertProtoViolation(t *testing.T) {
