@@ -373,7 +373,7 @@ func checkViolations(ctx context.Context, t *testing.T, _ *envconf.Config) conte
 			require.GreaterOrEqual(t, policy.Status.ViolationCount, int64(1))
 			require.Equal(t, int64(1), policy.Status.ActiveViolationCount)
 			violation := policy.Status.Violations[0]
-			require.Equal(t, "egress", violation.Direction)
+			require.Equal(t, string(networkingv1.PolicyTypeEgress), violation.Direction)
 			require.Equal(t, corev1.ProtocolUDP, violation.Protocol)
 			require.Equal(t, simpleAppUDPServerPort, violation.DstPort)
 			require.Equal(t, securityv1alpha1.WorkloadNetworkPolicyModeProtect, violation.Action)

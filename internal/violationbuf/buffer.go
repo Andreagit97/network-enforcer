@@ -15,7 +15,7 @@ import (
 type ViolationRecord struct {
 	Timestamp time.Time
 	NodeName  string
-	Direction string // "egress" or "ingress"
+	Direction string // "Egress" or "Ingress"
 
 	SrcNamespace string
 	SrcName      string
