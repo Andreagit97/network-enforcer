@@ -199,6 +199,7 @@ func run(logger *slog.Logger, conf *config) error {
 		logger,
 		conf.drainFlowsInterval,
 		monitorViolationBuffer,
+		eventLogger,
 	)
 	err = mgr.Add(scanner)
 	if err != nil {

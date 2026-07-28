@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	otellog "go.opentelemetry.io/otel/log"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +33,7 @@ type TopologyScanner struct {
 	log                    *slog.Logger
 	interval               time.Duration
 	monitorViolationBuffer *violationbuf.Buffer
+	monitorViolationLogger otellog.Logger
 }
 
 func NewTopologyScanner(
@@ -40,6 +42,7 @@ func NewTopologyScanner(
 	logger *slog.Logger,
 	drainInterval time.Duration,
 	violationBuffer *violationbuf.Buffer,
+	eventLogger otellog.Logger,
 ) *TopologyScanner {
 	return &TopologyScanner{
 		client:                 c,
@@ -47,6 +50,7 @@ func NewTopologyScanner(
 		log:                    logger.With("component", "topology-scanner"),
 		interval:               drainInterval,
 		monitorViolationBuffer: violationBuffer,
+		monitorViolationLogger: eventLogger,
 	}
 }
 
@@ -145,9 +149,36 @@ func (ts *TopologyScanner) sendMonitorViolations(
 		if !ts.monitorViolationBuffer.Record(violation) {
 			ts.log.WarnContext(ctx, "Monitor violation not recorded", "violation", violation)
 		}
-	}
 
-	// todo!: send each violation through otel
+		if ts.monitorViolationLogger == nil {
+			continue
+		}
+
+		var rec otellog.Record
+		const eventNamePolicyViolationDetected = "policy_violation"
+		rec.SetEventName(eventNamePolicyViolationDetected)
+		rec.SetSeverity(otellog.SeverityInfo)
+		rec.SetBody(otellog.StringValue(eventNamePolicyViolationDetected))
+		rec.SetTimestamp(time.Now())
+		rec.AddAttributes(
+			otellog.String("timestamp", violation.Timestamp.UTC().Format(time.RFC3339)),
+			otellog.String("direction", violation.Direction),
+			otellog.String("source.namespace", violation.SrcNamespace),
+			// todo!: the `violationbuf.ViolationRecord` doesn't contain a `kind` field,
+			// we need to understand what we want as final format.
+			// otellog.String("source.workload.kind", ""),
+			otellog.String("source.workload.name", violation.SrcName),
+			otellog.String("dest.namespace", violation.DstNamespace),
+			// otellog.String("dest.workload.kind", ""),
+			otellog.String("dest.workload.name", violation.DstName),
+			otellog.String("protocol", string(violation.Protocol)),
+			otellog.Int64("dstPort", int64(violation.DstPort)),
+			otellog.String("action", string(violation.Action)),
+			otellog.String("denyingPolicy.namespace", violation.DenyingPolicyNamespace),
+			otellog.String("denyingPolicy.name", violation.DenyingPolicyName),
+		)
+		ts.monitorViolationLogger.Emit(ctx, rec)
+	}
 
 	return nil
 }
