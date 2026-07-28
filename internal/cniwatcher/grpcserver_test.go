@@ -155,8 +155,8 @@ func TestProcessPolicyDenyEvent_RecordsToBuffer(t *testing.T) {
 	}
 
 	err := watcher.ProcessPolicyDenyEvent(event)
-	// Should error because OtelService is nil...
-	require.Error(t, err)
+	// OtelService is nil (OTLP disabled); emit is skipped gracefully...
+	require.NoError(t, err)
 	// ...but buffer should have the record.
 	records := buf.Drain()
 	require.Len(t, records, 1)

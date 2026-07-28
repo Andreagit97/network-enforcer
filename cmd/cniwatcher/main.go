@@ -32,13 +32,30 @@ func grpcConfigFromFlags() cniwatcher.GRPCServerConfig {
 	}
 }
 
-func newOtelService(ctx context.Context, logger *slog.Logger, grpcConfig cniwatcher.GRPCServerConfig) *otel.Service {
+// newOtelService builds the OTLP log exporter for policy_deny events from
+// the OTEL_EXPORTER_OTLP_* environment variables emitted by the Helm chart.
+// The gRPC ScrapeViolations server config (grpcConfig) is intentionally not
+// reused: the OTLP exporter must honor the telemetry collector strategy
+// (default/external/none), which is independent of the cniwatcher mTLS cert
+// dir used for the ScrapeViolations server.
+//
+// Returns nil when no OTLP endpoint is configured (collectorStrategy=none);
+// the caller treats a nil service as "OTLP disabled".
+func newOtelService(ctx context.Context, logger *slog.Logger) *otel.Service {
 	otlpEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if otlpEndpoint == "" {
+		logger.InfoContext(ctx, "OTLP endpoint not set, disabling OpenTelemetry export")
+		return nil
+	}
+
 	otelCfg := otel.OpenTelemetryConfig{
 		Ctx:               ctx,
 		Log:               logger,
 		CollectorEndpoint: otlpEndpoint,
-		CertDir:           grpcConfig.CertDir,
+		Protocol:          os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"),
+		CACert:            os.Getenv("OTEL_EXPORTER_OTLP_CERTIFICATE"),
+		ClientCert:        os.Getenv("OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE"),
+		ClientKey:         os.Getenv("OTEL_EXPORTER_OTLP_CLIENT_KEY"),
 	}
 	svc := otel.NewOpenTelemetryService(otelCfg)
 	if err := svc.Start(); err != nil {
@@ -55,7 +72,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	otelService := newOtelService(ctx, logger, grpcConfig)
+	otelService := newOtelService(ctx, logger)
 
 	ctrlClient, err := client.New(config.GetConfigOrDie(), client.Options{})
 	if err != nil {

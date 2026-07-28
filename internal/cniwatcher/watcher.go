@@ -90,7 +90,10 @@ func (w *Watcher) ProcessPolicyDenyEvent(event *types.PolicyDenyEvent) error {
 	}
 
 	if w.OtelService == nil {
-		return errors.New("OpenTelemetry service is not initialized")
+		// OTLP export is disabled (no endpoint configured). The event is
+		// still recorded in the violation buffer above for the gRPC
+		// ScrapeViolations server to expose to the controller.
+		return nil
 	}
 
 	return w.OtelService.EmitPolicyDenyEvent(event)
