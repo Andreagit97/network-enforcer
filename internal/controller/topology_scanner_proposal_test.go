@@ -101,7 +101,7 @@ func TestTopologyScannerReconcileConnection(t *testing.T) {
 			Namespace: expectedProposal.Namespace,
 		},
 		Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
-			Mode:           securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
+			Mode:           securityv1alpha1.WorkloadNetworkPolicyModeProtect,
 			PolicyTemplate: expectedProposal.Spec,
 		},
 	}
@@ -129,7 +129,7 @@ func TestTopologyScannerReconcileConnection(t *testing.T) {
 			},
 		},
 		{
-			name: "policy_already_exists",
+			name: "policy_already_exists_protect_mode",
 			setup: func() []client.Object {
 				return []client.Object{promotedPolicy}
 			},
