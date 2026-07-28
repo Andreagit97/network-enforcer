@@ -7,16 +7,18 @@ import (
 )
 
 const (
-	defaultChartPath               = "../../charts/network-enforcer"
-	defaultLogsDir                 = "./logs"
-	defaultControllerImage         = "ghcr.io/rancher-sandbox/network-enforcer/controller:latest"
-	defaultCNIWatcherImage         = "ghcr.io/rancher-sandbox/network-enforcer/cniwatcher:latest"
-	defaultReleaseName             = "network-enforcer"
-	defaultReleaseNS               = "network-enforcer"
-	defaultNamespacePref           = "network-enforcer-e2e"
-	defaultCNI                     = cilium
-	defaultDrainFlowsInterval      = 3 * time.Second // we reduce the time here to have faster feedback on the learning phase
-	defaultWnpStatusUpdateInterval = 3 * time.Second // we reduce the time here to have faster feedback from the controller
+	defaultChartPath                   = "../../charts/network-enforcer"
+	defaultLogsDir                     = "./logs"
+	defaultControllerImage             = "ghcr.io/rancher-sandbox/network-enforcer/controller:latest"
+	defaultCNIWatcherImage             = "ghcr.io/rancher-sandbox/network-enforcer/cniwatcher:latest"
+	defaultReleaseName                 = "network-enforcer"
+	defaultReleaseNS                   = "network-enforcer"
+	defaultNamespacePref               = "network-enforcer-e2e"
+	defaultCNI                         = cilium
+	defaultDrainFlowsInterval          = 3 * time.Second // we reduce the time here to have faster feedback on the learning phase
+	defaultWnpStatusUpdateInterval     = 3 * time.Second // we reduce the time here to have faster feedback from the controller
+	defaultOTelCollectorDeploymentName = "network-enforcer-otel-collector"
+	defaultPolicyDenyMetricName        = "network_enforcer_policy_denies"
 
 	noCNIConfigPath = "./clusters/no-cni.yaml"
 )
