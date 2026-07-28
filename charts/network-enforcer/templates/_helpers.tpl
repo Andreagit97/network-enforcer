@@ -80,28 +80,86 @@ DNS name of the controller OTLP service; also a SAN on the controller cert.
 {{- end -}}
 
 {{/*
+Certificate directory for the shipped OTel collector's own (server-side) mTLS
+keys, mounted via cert-manager CSI.
+*/}}
+{{- define "network-enforcer.otelCollector.certDir" -}}
+/etc/otel-collector/certs
+{{- end -}}
+
+{{/*
+Path to the CA certificate (ca.crt) shared by the controller and cniwatcher
+pods through their cert-manager CSI mount (network-enforcer.cniwatcher.certDir).
+It is used to verify the shipped OTel collector's TLS certificate when
+collectorStrategy == default.
+*/}}
+{{- define "network-enforcer.otel.caCertPath" -}}
+{{ include "network-enforcer.cniwatcher.certDir" . }}/ca.crt
+{{- end -}}
+
+{{/*
 Print the otel environment variable settings.
 */}}
 {{- define "network-enforcer.otel.config.env" }}
-{{- with .Values.otel }}
-{{- if .endpoint }}
+{{- if eq .Values.telemetry.collectorStrategy "default" }}
 - name: OTEL_EXPORTER_OTLP_ENDPOINT
-  value: {{ quote .endpoint }}
+  value: https://{{ include "network-enforcer.fullname" . }}-otel-collector.{{ .Release.Namespace }}.svc.cluster.local:4317
 - name: OTEL_EXPORTER_OTLP_PROTOCOL
-  value: {{ quote .protocol }}
-{{- if .caCert }}
+  value: grpc
 - name: OTEL_EXPORTER_OTLP_CERTIFICATE
-  value: {{ quote .caCert }}
+  value: {{ include "network-enforcer.otel.caCertPath" . }}
+{{- else if eq .Values.telemetry.collectorStrategy "external" }}
+- name: OTEL_EXPORTER_OTLP_ENDPOINT
+  value: {{ .Values.telemetry.externalCollector.endpoint }}
+- name: OTEL_EXPORTER_OTLP_PROTOCOL
+  value: {{ .Values.telemetry.externalCollector.protocol }}
+{{- if .Values.telemetry.externalCollector.otelCollectorCertificateSecret }}
+- name: OTEL_EXPORTER_OTLP_CERTIFICATE
+  value: /tmp/otel-collector-certs/ca.crt
+{{- else }}
+- name: OTEL_EXPORTER_OTLP_INSECURE
+  value: "true"
 {{- end }}
-{{- if .clientCert }}
+{{- if .Values.telemetry.externalCollector.otelCollectorClientCertificateSecret }}
 - name: OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE
-  value: {{ quote .clientCert }}
-{{- end }}
-{{- if .clientKey }}
+  value: /tmp/otel-collector-client-certs/tls.crt
 - name: OTEL_EXPORTER_OTLP_CLIENT_KEY
-  value: {{ quote .clientKey }}
+  value: /tmp/otel-collector-client-certs/tls.key
 {{- end }}
 {{- end }}
+{{- end }}
+
+{{/*
+Print the otel volumeMounts settings (only relevant for the external strategy).
+The strategy gate mirrors network-enforcer.otel.config.volumes so mounts and
+volumes are always emitted (or omitted) as a pair.
+*/}}
+{{- define "network-enforcer.otel.config.volumeMounts" }}
+{{- if and (eq .Values.telemetry.collectorStrategy "external") .Values.telemetry.externalCollector.otelCollectorCertificateSecret }}
+- name: otel-collector-ca-cert
+  mountPath: /tmp/otel-collector-certs
+  readOnly: true
+{{- end }}
+{{- if and (eq .Values.telemetry.collectorStrategy "external") .Values.telemetry.externalCollector.otelCollectorClientCertificateSecret }}
+- name: otel-collector-client-cert
+  mountPath: /tmp/otel-collector-client-certs
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{/*
+Print the otel volumes settings (only relevant for the external strategy).
+*/}}
+{{- define "network-enforcer.otel.config.volumes" }}
+{{- if and (eq .Values.telemetry.collectorStrategy "external") .Values.telemetry.externalCollector.otelCollectorCertificateSecret }}
+- name: otel-collector-ca-cert
+  secret:
+    secretName: {{ .Values.telemetry.externalCollector.otelCollectorCertificateSecret }}
+{{- end }}
+{{- if and (eq .Values.telemetry.collectorStrategy "external") .Values.telemetry.externalCollector.otelCollectorClientCertificateSecret }}
+- name: otel-collector-client-cert
+  secret:
+    secretName: {{ .Values.telemetry.externalCollector.otelCollectorClientCertificateSecret }}
 {{- end }}
 {{- end }}
 

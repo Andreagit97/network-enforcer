@@ -54,11 +54,13 @@ spec:
 
           volumeMounts:
             {{- include "network-enforcer.cniwatcher.volumeMounts" . | nindent 12 }}
+            {{- include "network-enforcer.otel.config.volumeMounts" . | nindent 12 }}
             {{- if .Values.cniwatcher.volumeMounts }}
             {{- toYaml .Values.cniwatcher.volumeMounts | nindent 12 }}
             {{- end }}
       volumes:
         {{- include "network-enforcer.cniwatcher.volumes" . | nindent 8 }}
+        {{- include "network-enforcer.otel.config.volumes" . | nindent 8 }}
         {{- if .Values.cniwatcher.volumes }}
         {{- toYaml .Values.cniwatcher.volumes | nindent 8 }}
         {{- end }}

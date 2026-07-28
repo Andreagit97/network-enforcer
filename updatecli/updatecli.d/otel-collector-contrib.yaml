@@ -1,0 +1,58 @@
+name: Update otel-collector-contrib image
+
+pipelineid: otel/collector-contrib/version
+
+sources:
+  otelCollectorContrib:
+    name: Get latest otel-collector-contrib version
+    kind: dockerimage
+    spec:
+      image: otel/opentelemetry-collector-contrib
+      versionfilter:
+        kind: semver
+        prerelease: false
+
+targets:
+  otelCollectorValues:
+    name: 'deps(otel): update otel-collector-contrib to {{ source "otelCollectorContrib" }}'
+    kind: yaml
+    sourceid: otelCollectorContrib
+    scmid: default
+    spec:
+      file: charts/network-enforcer/values.yaml
+      key: $.telemetry.defaultCollector.image.tag
+
+actions:
+  default:
+    title: 'deps(otel): update otel-collector-contrib to {{ source "otelCollectorContrib" }}'
+    kind: github/pullrequest
+    scmid: default
+    spec:
+      automerge: false
+      mergemethod: squash
+      description: |
+        Automatic otel/opentelemetry-collector-contrib image {{ source "otelCollectorContrib" }} update.
+        This PR has been created by automation to keep the otel-collector-contrib image in the network-enforcer Helm chart up to date.
+      draft: false
+      labels:
+        - "chore"
+        - "dependencies"
+
+scms:
+  default:
+    kind: github
+    spec:
+      user: "{{ .github.author }}"
+      email: "{{ .github.email }}"
+      owner: "{{ requiredEnv .github.owner }}"
+      repository: "network-enforcer"
+      token: "{{ requiredEnv .github.token }}"
+      username: "{{ requiredEnv .github.user }}"
+      branch: "{{ .github.branch }}"
+      commitusingapi: true
+      commitmessage:
+        type: "chore"
+        scope: deps
+        title: "update otel-collector-contrib image"
+        hidecredit: true
+        footers: "Signed-off-by: NetworkEnforcer bot <network-enforcer-bot@users.noreply.github.com>"

@@ -72,6 +72,7 @@ spec:
         - name: cniwatcher-mtls-certs
           mountPath: {{ include "network-enforcer.cniwatcher.certDir" . }}
           readOnly: true
+        {{- include "network-enforcer.otel.config.volumeMounts" . | indent 8 }}
       volumes:
       - name: cniwatcher-mtls-certs
         csi:
@@ -81,6 +82,7 @@ spec:
             csi.cert-manager.io/issuer-name: {{ include "network-enforcer.caIssuerName" . }}
             csi.cert-manager.io/issuer-kind: Issuer
             csi.cert-manager.io/dns-names: {{ include "network-enforcer.fullname" . }}-controller-manager.{{ .Release.Namespace }}.svc,{{ include "network-enforcer.fullname" . }}-otlp,{{ include "network-enforcer.controller.otlpServiceDNS" . }}
+      {{- include "network-enforcer.otel.config.volumes" . | indent 6 }}
       securityContext: {{- toYaml .Values.controller.podSecurityContext | nindent
         8 }}
       {{- with .Values.controller.tolerations }}

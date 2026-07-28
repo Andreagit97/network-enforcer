@@ -99,19 +99,42 @@ obi:
           csi.cert-manager.io/issuer-kind: Issuer
           csi.cert-manager.io/dns-names: ${POD_NAME}.${POD_NAMESPACE}
 
-# Shared OTLP configuration used by all components.
-otel:
-  # OTLP endpoint (host:port). Empty disables OTLP.
-  endpoint: ""
-  # Protocol: "grpc" or "http/protobuf".
-  protocol: grpc
-  # Path to the CA certificate for verifying the collector's TLS cert.
-  # Empty means insecure.
-  caCert: ""
-  # Path to the client TLS certificate and key for mTLS with the collector.
-  # Both must be set to enable client cert auth.
-  clientCert: ""
-  clientKey: ""
+telemetry:
+  collectorStrategy: "default" # @schema enum: [none, default, external]
+  defaultCollector:
+    image:
+      repository: otel/opentelemetry-collector-contrib
+      tag: 0.157.0
+      pullPolicy: IfNotPresent
+    resources:
+      limits:
+        cpu: 250m
+        memory: 128Mi
+      requests:
+        cpu: 10m
+        memory: 64Mi
+  externalCollector:
+    # telemetry.externalCollector.endpoint is the Otel collector endpoint to send signals to.
+    # For gRPC, it should be in the format <hostname>:<port>.
+    # For HTTP, it should be in the format http(s)://<hostname>:<port>.
+    endpoint: ""
+    # telemetry.externalCollector.protocol is the protocol to use for the Otel collector.
+    protocol: "grpc" # @schema enum: [grpc, http/protobuf]
+    # The following settings are required to configure the OpenTelemetry exporter
+    # to send signals to a remote collector using TLS.
+    # Both secrets must be created in the same namespace where the controller is deployed.
+    #
+    # If otelCollectorCertificateSecret is not set, TLS verification is disabled
+    # (insecure mode). When set, the certificate is used to validate the remote
+    # collector.
+    #
+    # telemetry.externalCollector.otelCollectorCertificateSecret should contain a key ca.crt
+    # storing the certificate to validate the remote collector certificate.
+    otelCollectorCertificateSecret: ""
+    # telemetry.externalCollector.otelCollectorClientCertificateSecret is optional.
+    # Only required when the remote collector requires client authentication (mTLS).
+    # The secret should contain the keys `tls.crt` and `tls.key`.
+    otelCollectorClientCertificateSecret: ""
 
 cniwatcher:
   enabled: true
