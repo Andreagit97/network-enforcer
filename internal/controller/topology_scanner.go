@@ -146,8 +146,8 @@ func (ts *TopologyScanner) sendMonitorViolations(
 	}
 
 	for _, violation := range violations {
-		if !ts.monitorViolationBuffer.Record(violation) {
-			ts.log.WarnContext(ctx, "Monitor violation not recorded", "violation", violation)
+		if ts.monitorViolationBuffer.Record(violation) {
+			ts.log.WarnContext(ctx, "Monitor violation dropped", "violation", violation)
 		}
 
 		if ts.monitorViolationLogger == nil {
