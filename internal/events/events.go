@@ -4,8 +4,6 @@ package events
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"strings"
@@ -51,49 +49,6 @@ func stringToProtocol(s string) (protocol, error) {
 	}
 }
 
-// buildTLSConfig returns a TLS config that re-reads the CA on every
-// handshake (certificate rotation) and optionally presents a client cert.
-func buildTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*tls.Config, error) {
-	// Validate that the CA certificate is readable at startup.
-	if _, err := tlsutil.LoadCACertPool(caCertPath); err != nil {
-		return nil, err
-	}
-	// Fail fast on partial client cert configuration.
-	if (clientCertPath != "") != (clientKeyPath != "") {
-		return nil, fmt.Errorf("both or neither of client cert and key must be set (cert=%q, key=%q)",
-			clientCertPath, clientKeyPath)
-	}
-	cfg := &tls.Config{
-		MinVersion: tls.VersionTLS13,
-		// Re-read CA on every handshake to handle rotation.
-		InsecureSkipVerify: true, //nolint:gosec // verified in VerifyConnection
-		VerifyConnection: func(cs tls.ConnectionState) error {
-			certPool, err := tlsutil.LoadCACertPool(caCertPath)
-			if err != nil {
-				return err
-			}
-			opts := x509.VerifyOptions{
-				Roots:         certPool,
-				DNSName:       cs.ServerName,
-				Intermediates: x509.NewCertPool(),
-			}
-			for _, cert := range cs.PeerCertificates[1:] {
-				opts.Intermediates.AddCert(cert)
-			}
-			_, err = cs.PeerCertificates[0].Verify(opts)
-			return err
-		},
-	}
-	if clientCertPath != "" && clientKeyPath != "" {
-		clientCert, err := tlsutil.LoadKeyPair(clientCertPath, clientKeyPath)
-		if err != nil {
-			return nil, err
-		}
-		cfg.Certificates = []tls.Certificate{clientCert}
-	}
-	return cfg, nil
-}
-
 func createGRPCExporter(ctx context.Context,
 	endpoint, caCertPath, clientCertPath, clientKeyPath string,
 ) (sdklog.Exporter, error) {
@@ -106,7 +61,7 @@ func createGRPCExporter(ctx context.Context,
 	if insecure {
 		opts = append(opts, otlploggrpc.WithInsecure())
 	} else {
-		tlsConfig, err := buildTLSConfig(caCertPath, clientCertPath, clientKeyPath)
+		tlsConfig, err := tlsutil.ClientTLSConfig(caCertPath, clientCertPath, clientKeyPath)
 		if err != nil {
 			return nil, err
 		}
@@ -130,7 +85,7 @@ func createHTTPExporter(ctx context.Context,
 	if caCertPath == "" || strings.HasPrefix(endpoint, "http://") {
 		opts = append(opts, otlploghttp.WithInsecure())
 	} else {
-		tlsConfig, err := buildTLSConfig(caCertPath, clientCertPath, clientKeyPath)
+		tlsConfig, err := tlsutil.ClientTLSConfig(caCertPath, clientCertPath, clientKeyPath)
 		if err != nil {
 			return nil, err
 		}

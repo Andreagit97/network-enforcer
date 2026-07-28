@@ -5,24 +5,57 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
+	"strings"
 	"time"
 
 	"github.com/rancher-sandbox/network-enforcer/internal/tlsutil"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	otellog "go.opentelemetry.io/otel/log"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
+	"google.golang.org/grpc/credentials"
 )
 
 type OpenTelemetryConfig struct {
 	Ctx               context.Context
 	Log               *slog.Logger
 	CollectorEndpoint string
-	// CertDir enables exporter mTLS; empty means insecure (plaintext).
-	CertDir string
+	// Protocol is the OTLP protocol: "grpc" or "http/protobuf".
+	// Empty defaults to "grpc".
+	Protocol string
+	// CACert is the path to the CA certificate for verifying the collector's
+	// TLS cert. Empty means insecure (plaintext).
+	CACert string
+	// ClientCert is the path to the client TLS certificate for mTLS.
+	// Optional; requires CACert and ClientKey.
+	ClientCert string
+	// ClientKey is the path to the client TLS key for mTLS.
+	// Optional; requires CACert and ClientCert.
+	ClientKey string
+}
+
+type protocol string
+
+const (
+	protocolGRPC         protocol = "grpc"
+	protocolHTTPProtobuf protocol = "http/protobuf"
+)
+
+func stringToProtocol(s string) (protocol, error) {
+	if s == "" {
+		return protocolGRPC, nil
+	}
+	switch s {
+	case "grpc":
+		return protocolGRPC, nil
+	case "http/protobuf":
+		return protocolHTTPProtobuf, nil
+	default:
+		return "", fmt.Errorf("unsupported protocol: %s", s)
+	}
 }
 
 type OpenTelemetryService struct {
@@ -43,17 +76,9 @@ func NewOpenTelemetryService(cfg OpenTelemetryConfig) *Service {
 }
 
 func (s *Service) Start() error {
-	transportOpt, err := s.exporterTransportOption()
+	exporter, err := s.createExporter()
 	if err != nil {
 		return err
-	}
-
-	exporter, err := otlploggrpc.New(s.Config.Ctx,
-		otlploggrpc.WithEndpoint(s.Config.CollectorEndpoint),
-		transportOpt,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create OTLP log exporter: %w", err)
 	}
 
 	res, err := resource.New(s.Config.Ctx,
@@ -71,28 +96,70 @@ func (s *Service) Start() error {
 	)
 
 	s.Service.Logger = s.Service.LoggerProvider.Logger("cniwatcher")
-	s.Config.Log.Info("OpenTelemetry initialized", "collector", s.Config.CollectorEndpoint)
+	s.Config.Log.Info("OpenTelemetry initialized",
+		"collector", s.Config.CollectorEndpoint,
+		"protocol", s.Config.Protocol,
+		"insecure", s.Config.CACert == "")
 	return nil
 }
 
-func (s *Service) exporterTransportOption() (otlploggrpc.Option, error) {
-	if s.Config.CertDir == "" {
-		return otlploggrpc.WithInsecure(), nil
-	}
-
-	// The receiver cert is verified against its DNS name, so drop the port.
-	serverName, _, err := net.SplitHostPort(s.Config.CollectorEndpoint)
+func (s *Service) createExporter() (sdklog.Exporter, error) {
+	proto, err := stringToProtocol(s.Config.Protocol)
 	if err != nil {
-		serverName = s.Config.CollectorEndpoint
+		return nil, err
 	}
 
-	creds, err := tlsutil.ClientCredentials(s.Config.CertDir, serverName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create OTLP exporter mTLS credentials: %w", err)
+	// Reject client certs without a CA up front, mirroring events.Init.
+	if s.Config.CACert == "" && (s.Config.ClientCert != "" || s.Config.ClientKey != "") {
+		return nil, errors.New("client certificate requires a CA certificate (caCert is empty)")
 	}
 
-	s.Config.Log.Info("OTLP exporter using mTLS", "cert_dir", s.Config.CertDir, "server_name", serverName)
-	return otlploggrpc.WithTLSCredentials(creds), nil
+	switch proto {
+	case protocolGRPC:
+		return s.createGRPCExporter()
+	case protocolHTTPProtobuf:
+		return s.createHTTPExporter()
+	default:
+		return nil, fmt.Errorf("unsupported protocol: %s", s.Config.Protocol)
+	}
+}
+
+func (s *Service) createGRPCExporter() (sdklog.Exporter, error) {
+	// Strip any http(s) prefix; WithEndpoint expects host:port.
+	gRPCEndpoint := strings.TrimPrefix(strings.TrimPrefix(s.Config.CollectorEndpoint, "https://"), "http://")
+	insecure := s.Config.CACert == ""
+	opts := []otlploggrpc.Option{
+		otlploggrpc.WithEndpoint(gRPCEndpoint),
+	}
+	if insecure {
+		opts = append(opts, otlploggrpc.WithInsecure())
+	} else {
+		tlsConfig, err := tlsutil.ClientTLSConfig(s.Config.CACert, s.Config.ClientCert, s.Config.ClientKey)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, otlploggrpc.WithTLSCredentials(credentials.NewTLS(tlsConfig)))
+	}
+	return otlploggrpc.New(s.Config.Ctx, opts...)
+}
+
+func (s *Service) createHTTPExporter() (sdklog.Exporter, error) {
+	// Strip any scheme prefix; WithEndpoint expects host:port.
+	httpEndpoint := strings.TrimPrefix(strings.TrimPrefix(s.Config.CollectorEndpoint, "https://"), "http://")
+	opts := []otlploghttp.Option{
+		otlploghttp.WithEndpoint(httpEndpoint),
+	}
+	// Empty CA means insecure. An explicit http:// scheme also opts into insecure.
+	if s.Config.CACert == "" || strings.HasPrefix(s.Config.CollectorEndpoint, "http://") {
+		opts = append(opts, otlploghttp.WithInsecure())
+	} else {
+		tlsConfig, err := tlsutil.ClientTLSConfig(s.Config.CACert, s.Config.ClientCert, s.Config.ClientKey)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, otlploghttp.WithTLSClientConfig(tlsConfig))
+	}
+	return otlploghttp.New(s.Config.Ctx, opts...)
 }
 
 func policiesToStrings(policies []types.Policy) []string {
