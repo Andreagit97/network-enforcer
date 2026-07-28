@@ -19,7 +19,6 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/grpcexporter"
-	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
 	agentv1 "github.com/rancher-sandbox/network-enforcer/proto/agent/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -568,24 +567,16 @@ func TestSyncLoopIntegration(t *testing.T) {
 		},
 	}
 
-	sync := &WorkloadNetworkPolicyStatusSync{
-		Client:          fakeClient,
-		agentClientPool: pool,
-		updateInterval:  time.Hour,
-		logger:          ctrl.Log.WithName("test"),
-	}
-
-	err := sync.sync(context.Background())
-	require.NoError(t, err)
+	sync := newTestWorkloadNetworkStatusSync(fakeClient).withPool(pool)
+	require.NoError(t, sync.sync(t.Context()))
 
 	// Verify the WNP status was updated.
 	var updatedWNP securityv1alpha1.WorkloadNetworkPolicy
-	err = fakeClient.Get(
+	require.NoError(t, fakeClient.Get(
 		context.Background(),
 		types.NamespacedName{Namespace: "default", Name: "my-policy"},
 		&updatedWNP,
-	)
-	require.NoError(t, err)
+	))
 	require.Equal(t, int64(1), updatedWNP.Status.ViolationCount)
 	require.Equal(t, int64(1), updatedWNP.Status.ActiveViolationCount)
 	require.Len(t, updatedWNP.Status.Violations, 1)
@@ -662,24 +653,16 @@ func TestSyncClearsViolationsWithNoNewScrapedViolations(t *testing.T) {
 	// Pool with no reachable nodes → empty scrape → zero violations.
 	pool := &fakePool{nodeClients: map[string]grpcexporter.AgentClientAPI{}}
 
-	sync := &WorkloadNetworkPolicyStatusSync{
-		Client:                 fakeClient,
-		agentClientPool:        pool,
-		updateInterval:         time.Hour,
-		logger:                 ctrl.Log.WithName("test"),
-		monitorViolationBuffer: violationbuf.NewBuffer(),
-	}
+	sync := newTestWorkloadNetworkStatusSync(fakeClient).withPool(pool)
 
-	err := sync.sync(context.Background())
-	require.NoError(t, err)
+	require.NoError(t, sync.sync(t.Context()))
 
 	var updatedWNP securityv1alpha1.WorkloadNetworkPolicy
-	err = fakeClient.Get(
+	require.NoError(t, fakeClient.Get(
 		context.Background(),
 		types.NamespacedName{Namespace: "ns1", Name: "policy-1"},
 		&updatedWNP,
-	)
-	require.NoError(t, err)
+	))
 
 	// The violation should have been cleared because it matches a rule in
 	// the current policy template (clearAllowedViolations ran even though
@@ -713,12 +696,7 @@ func TestTwoPhasePatchConflict(t *testing.T) {
 		WithObjects(wnp, ownedNP).
 		Build()
 
-	sync := &WorkloadNetworkPolicyStatusSync{
-		Client:          fakeClient,
-		agentClientPool: &fakePool{},
-		updateInterval:  time.Hour,
-		logger:          ctrl.Log.WithName("test"),
-	}
+	sync := newTestWorkloadNetworkStatusSync(fakeClient)
 
 	violations := []securityv1alpha1.ViolationRecord{
 		{
@@ -739,17 +717,15 @@ func TestTwoPhasePatchConflict(t *testing.T) {
 		},
 	}
 
-	err := sync.processWorkloadNetworkPolicy(context.Background(), wnp, violations)
-	require.NoError(t, err)
+	require.NoError(t, sync.processWorkloadNetworkPolicy(t.Context(), wnp, violations))
 
 	// The existing annotation should still be present.
 	var updatedWNP securityv1alpha1.WorkloadNetworkPolicy
-	err = fakeClient.Get(
+	require.NoError(t, fakeClient.Get(
 		context.Background(),
 		types.NamespacedName{Namespace: "ns1", Name: "conflict-policy"},
 		&updatedWNP,
-	)
-	require.NoError(t, err)
+	))
 	require.Equal(t, "original-value", updatedWNP.Annotations["existing.io/key"])
 	// Status should also be updated.
 	require.Equal(t, int64(1), updatedWNP.Status.ActiveViolationCount)

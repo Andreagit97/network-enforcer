@@ -131,6 +131,11 @@ func (r *WorkloadNetworkPolicyStatusSync) withLogger(logger otellog.Logger) *Wor
 	return r
 }
 
+func (r *WorkloadNetworkPolicyStatusSync) withPool(pool AgentClientPoolAPI) *WorkloadNetworkPolicyStatusSync {
+	r.agentClientPool = pool
+	return r
+}
+
 func (r *WorkloadNetworkPolicyStatusSync) getOtelLogger() *fakeEventLogger {
 	return r.eventLogger.(*fakeEventLogger)
 }
