@@ -131,14 +131,12 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 	tests := []struct {
 		name       string
 		sync       *WorkloadNetworkPolicyStatusSync
-		ownedIndex map[types.NamespacedName]types.NamespacedName
 		violations []*agentv1.ViolationRecord
 		check      func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord)
 	}{
 		{
-			name:       "attributes_egress_deny_to_WNP",
-			sync:       &WorkloadNetworkPolicyStatusSync{},
-			ownedIndex: ownedIndex,
+			name: "attributes_egress_deny_to_WNP",
+			sync: &WorkloadNetworkPolicyStatusSync{},
 			violations: []*agentv1.ViolationRecord{
 				newProtoViolation(ts, "node-1", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
 					"ns1", "policy-1"),
@@ -154,9 +152,8 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			},
 		},
 		{
-			name:       "attributes_ingress_deny_to_WNP",
-			sync:       &WorkloadNetworkPolicyStatusSync{},
-			ownedIndex: ownedIndex,
+			name: "attributes_ingress_deny_to_WNP",
+			sync: &WorkloadNetworkPolicyStatusSync{},
 			violations: []*agentv1.ViolationRecord{
 				newProtoViolation(ts, "node-1", "ingress", "src-ns", "src-app", "dst-ns", "dst-svc",
 					"ns1", "policy-1"),
@@ -182,7 +179,6 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 					logger: ctrl.Log.WithName("test"),
 				}
 			}(),
-			ownedIndex: ownedIndex,
 			violations: []*agentv1.ViolationRecord{
 				newProtoViolation(ts, "node-1", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
 					"ns-other", "raw-policy"),
@@ -197,7 +193,6 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 				Client: fake.NewClientBuilder().WithScheme(newTestScheme()).Build(),
 				logger: ctrl.Log.WithName("test"),
 			},
-			ownedIndex: ownedIndex,
 			violations: []*agentv1.ViolationRecord{
 				newProtoViolation(ts, "node-1", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
 					"ns-missing", "deleted-policy"),
@@ -207,9 +202,8 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			},
 		},
 		{
-			name:       "drops_deny_with_empty_denying_policy",
-			sync:       &WorkloadNetworkPolicyStatusSync{logger: ctrl.Log.WithName("test")},
-			ownedIndex: ownedIndex,
+			name: "drops_deny_with_empty_denying_policy",
+			sync: &WorkloadNetworkPolicyStatusSync{logger: ctrl.Log.WithName("test")},
 			violations: []*agentv1.ViolationRecord{
 				newProtoViolation(ts, "node-1", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
 					"", ""),
@@ -219,9 +213,8 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			},
 		},
 		{
-			name:       "dedup_by_violation_key",
-			sync:       &WorkloadNetworkPolicyStatusSync{},
-			ownedIndex: ownedIndex,
+			name: "dedup_by_violation_key",
+			sync: &WorkloadNetworkPolicyStatusSync{},
 			violations: []*agentv1.ViolationRecord{
 				newProtoViolation(ts, "node-1", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
 					"ns1", "policy-1"),
@@ -240,7 +233,7 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := tt.sync.correlateViolationsToWNPs(context.Background(), tt.violations, tt.ownedIndex)
+			result := tt.sync.correlateViolationsToWNPs(context.Background(), tt.violations, ownedIndex)
 			tt.check(t, result)
 		})
 	}
