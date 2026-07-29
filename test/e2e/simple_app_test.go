@@ -262,19 +262,32 @@ func assessPoliciesAreNotUpdatedInMonitorMode(ctx context.Context, t *testing.T,
 				return false
 			}
 
-			if len(policy.Status.Violations) > 0 {
-				// todo!: this will change in the future when we will implement violation for monitor mode
-				t.Logf(
-					"Network policy %q has violations but it shouldn't: %v",
-					policy.NamespacedName().String(),
-					policy.Status.Violations,
-				)
-				return true
-			}
-
 			// the spec shouldn't change
 			return !apiequality.Semantic.DeepEqual(storedPolicy.Spec.PolicyTemplate, policy.Spec.PolicyTemplate)
 		}, 2*getSuiteConfig(ctx).drainFlowsInterval, 1*time.Second, "Network policy is updated, but it should not be", storedPolicy.NamespacedName().String())
+
+		var policy securityv1alpha1.WorkloadNetworkPolicy
+		require.Eventually(t, func() bool {
+			if err := client.Get(ctx, storedPolicy.Name, storedPolicy.Namespace, &policy); err != nil {
+				return false
+			}
+
+			if len(policy.Status.Violations) == 0 {
+				t.Logf("Network policy %q has no violations", policy.NamespacedName().String())
+				return false
+			}
+			return true
+		}, 2*getSuiteConfig(ctx).drainFlowsInterval, 1*time.Second)
+
+		// Both ingress and egress policy should have a violation since the traffic is flowing in the cluster.
+		require.Len(t, policy.Status.Violations, 1)
+		// todo!: also here like in protect mode the violation Count is high and not 1
+		require.Equal(t, int64(1), policy.Status.ActiveViolationCount)
+		violation := policy.Status.Violations[0]
+		require.Equal(t, string(policy.Spec.PolicyTemplate.PolicyTypes[0]), violation.Direction)
+		require.Equal(t, corev1.ProtocolUDP, violation.Protocol)
+		require.Equal(t, simpleAppUDPServerPort, violation.DstPort)
+		require.Equal(t, securityv1alpha1.WorkloadNetworkPolicyModeMonitor, violation.Action)
 	}
 	return ctx
 }
@@ -354,24 +367,23 @@ func checkViolations(ctx context.Context, t *testing.T, _ *envconf.Config) conte
 				if err := client.Get(ctx, policy.Name, policy.Namespace, &policy); err != nil {
 					return false
 				}
-				// Check if there are any violations
-				if len(policy.Status.Violations) == 0 {
-					return false
-				}
 				t.Logf("found violations in egress policy %q: %v",
 					policy.NamespacedName().String(), policy.Status.Violations)
-				return true
+
+				// we should have 2 violations, one in monitor and one in protect
+				return len(policy.Status.Violations) == 2
 				// even if the sync is pretty fast in e2e test (~3s)
 				// the cniwatcher will receive violations with a certain interval from the CNI (e.g. see `calicoAggregationInterval`)
 				// for this reason we keep the timeout pretty high.
 			}, defaultOperationTimeout, 1*time.Second)
 
 			// Assert some fields on the violation
-			require.Len(t, policy.Status.Violations, 1)
+			require.Len(t, policy.Status.Violations, 2)
 			// todo!: the violation count doesn't seem to match the number of packet dropped
 			// here we are dropping a single UDP packet but we see multiple violations.
 			require.GreaterOrEqual(t, policy.Status.ViolationCount, int64(1))
-			require.Equal(t, int64(1), policy.Status.ActiveViolationCount)
+			require.Equal(t, int64(2), policy.Status.ActiveViolationCount)
+			// the violation in protect mode should be the most recent in the slice
 			violation := policy.Status.Violations[0]
 			require.Equal(t, string(networkingv1.PolicyTypeEgress), violation.Direction)
 			require.Equal(t, corev1.ProtocolUDP, violation.Protocol)
@@ -382,8 +394,8 @@ func checkViolations(ctx context.Context, t *testing.T, _ *envconf.Config) conte
 				if err := client.Get(ctx, policy.Name, policy.Namespace, &policy); err != nil {
 					return false
 				}
-				// for the ingress policy we should never have violations
-				return len(policy.Status.Violations) > 0
+				// we should only have monitor violations for ingress
+				return len(policy.Status.Violations) != 1
 			}, 2*getSuiteConfig(ctx).wnpStatusUpdateInterval, 1*time.Second)
 		}
 	}
