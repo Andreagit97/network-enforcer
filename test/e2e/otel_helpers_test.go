@@ -110,8 +110,7 @@ func portForwardPod(
 	return int(forwardedPorts[0].Local), stopCh, nil
 }
 
-func fetchURL(url string) (string, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
+func fetchURL(client *http.Client, url string) (string, error) {
 	resp, err := client.Get(url)
 	if err != nil {
 		return "", err
@@ -185,42 +184,22 @@ func metricLabelValue(body, labelKey string) (string, bool) {
 	return "", false
 }
 
-// assertMetricLabelContains checks that a Prometheus sample for
-// defaultPolicyDenyMetricName has labelKey whose value contains substr.
-// Slice attributes are exported as JSON arrays (e.g. ["app=http-client"]),
-// so substring match is intentional.
-func assertMetricLabelContains(t *testing.T, body, labelKey, substr string) {
+// assertMetricLabelContainsAny fails unless labelKey's value contains at least
+// one of the expected substrings on a sample for defaultPolicyDenyMetricName.
+func assertMetricLabelContainsAny(t *testing.T, body, labelKey string, expectedSubstrs []string) {
 	t.Helper()
 
 	value, ok := metricLabelValue(body, labelKey)
-	if ok && strings.Contains(value, substr) {
-		return
-	}
-	assert.Failf(t, "metric label substring not found",
-		"expected metric %q label %s to contain %q\nmetrics:\n%s",
-		defaultPolicyDenyMetricName, labelKey, substr, body)
-}
-
-// assertMetricHasAnyLabelContainingAny fails unless at least one of labelKeys
-// contains at least one of the expected substrings on a sample for
-// defaultPolicyDenyMetricName.
-func assertMetricHasAnyLabelContainingAny(t *testing.T, body string, labelKeys, expectedSubstrs []string) {
-	t.Helper()
-
-	for _, key := range labelKeys {
-		value, ok := metricLabelValue(body, key)
-		if !ok {
-			continue
-		}
+	if ok {
 		for _, want := range expectedSubstrs {
 			if strings.Contains(value, want) {
 				return
 			}
 		}
 	}
-	assert.Failf(t, "expected policy identity not found in metric labels",
-		"expected metric %q labels %v to contain one of %v\nmetrics:\n%s",
-		defaultPolicyDenyMetricName, labelKeys, expectedSubstrs, body)
+	assert.Failf(t, "expected substring not found in metric label",
+		"expected metric %q label %s to contain one of %v\nmetrics:\n%s",
+		defaultPolicyDenyMetricName, labelKey, expectedSubstrs, body)
 }
 
 // checkPolicyDenyOTLPLog verifies that protect mode deny events observed by
@@ -239,13 +218,11 @@ func checkPolicyDenyOTLPLog(ctx context.Context, t *testing.T, config *envconf.C
 	defer close(stopCh)
 
 	promURL := fmt.Sprintf("http://localhost:%d/metrics", localPort)
+	client := &http.Client{Timeout: 10 * time.Second}
 
 	var metricsBody string
 	require.Eventually(t, func() bool {
-		_, cmd := getProtoCmd(corev1.ProtocolUDP)
-		_, _ = execInSimpleClientDeployment(ctx, t, cmd)
-
-		body, fetchErr := fetchURL(promURL)
+		body, fetchErr := fetchURL(client, promURL)
 		if fetchErr != nil {
 			t.Logf("failed to fetch metrics: %v", fetchErr)
 			return false
@@ -265,22 +242,14 @@ func checkPolicyDenyOTLPLog(ctx context.Context, t *testing.T, config *envconf.C
 	assertMetricHasLabel(t, metricsBody, "destination_port",
 		strconv.FormatInt(int64(simpleAppUDPServerPort), 10))
 
-	assertMetricLabelContains(t, metricsBody, "source_labels", "app="+simpleAppClientDeploymentName)
-	assertMetricLabelContains(t, metricsBody, "destination_labels", "app="+simpleAppServerDeploymentName)
-	// Calico does not expose source/destination workloads on deny flows in this test.
-	if suiteCfg.cni == cilium {
-		assertMetricLabelContains(t, metricsBody, "source_workloads", "Deployment/"+simpleAppClientDeploymentName)
-		assertMetricLabelContains(t, metricsBody, "destination_workloads", "Deployment/"+simpleAppServerDeploymentName)
-	}
-	// Calico reports the denying policy on one side (src=egress or dst=ingress).
+	// Calico reports the denying policy.
 	if suiteCfg.cni == calico {
 		storedPolicies := ctx.Value(key("policies")).([]securityv1alpha1.WorkloadNetworkPolicy)
 		policies := make([]string, 0, len(storedPolicies))
 		for _, p := range storedPolicies {
 			policies = append(policies, p.Name)
 		}
-		assertMetricHasAnyLabelContainingAny(t, metricsBody,
-			[]string{"egress_enforced_by", "ingress_enforced_by"}, policies)
+		assertMetricLabelContainsAny(t, metricsBody, "egress_enforced_by", policies)
 	}
 	return ctx
 }

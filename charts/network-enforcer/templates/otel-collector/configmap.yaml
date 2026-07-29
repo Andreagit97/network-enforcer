@@ -35,17 +35,7 @@ data:
               # Slice attrs are stringified as JSON arrays on the Prometheus
               # label (e.g. ["app=http-client"]). default_value keeps the
               # datapoint when the OTLP log omits an optional slice.
-              - key: source.labels
-                default_value: ""
-              - key: destination.labels
-                default_value: ""
-              - key: source.workloads
-                default_value: ""
-              - key: destination.workloads
-                default_value: ""
               - key: egress.enforced_by
-                default_value: ""
-              - key: ingress.enforced_by
                 default_value: ""
     processors:
       deltatocumulative: {}
