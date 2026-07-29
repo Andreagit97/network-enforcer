@@ -381,10 +381,20 @@ func checkViolations(ctx context.Context, t *testing.T, _ *envconf.Config) conte
 			require.Len(t, policy.Status.Violations, 2)
 			// todo!: the violation count doesn't seem to match the number of packet dropped
 			// here we are dropping a single UDP packet but we see multiple violations.
-			require.GreaterOrEqual(t, policy.Status.ViolationCount, int64(1))
+			require.GreaterOrEqual(t, policy.Status.ViolationCount, int64(2))
 			require.Equal(t, int64(2), policy.Status.ActiveViolationCount)
-			// the violation in protect mode should be the most recent in the slice
-			violation := policy.Status.Violations[0]
+			// Even if the protect violation is generated after the monitor one, some CNI report the timestamp
+			// as the starting time of the flow rather then the time the packet was dropped, so here we don't know
+			// the order of the violations, it probably depends on the CNI.
+			protectIndex := -1
+			for i := range policy.Status.Violations {
+				if policy.Status.Violations[i].Action == securityv1alpha1.WorkloadNetworkPolicyModeProtect {
+					protectIndex = i
+					break
+				}
+			}
+			require.NotEqual(t, -1, protectIndex, "no violation with action 'protect' found")
+			violation := policy.Status.Violations[protectIndex]
 			require.Equal(t, string(networkingv1.PolicyTypeEgress), violation.Direction)
 			require.Equal(t, corev1.ProtocolUDP, violation.Protocol)
 			require.Equal(t, simpleAppUDPServerPort, violation.DstPort)
