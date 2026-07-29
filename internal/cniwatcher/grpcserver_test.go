@@ -13,6 +13,7 @@ import (
 	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 )
 
 func TestGRPCServer_ScrapeViolations_Empty(t *testing.T) {
@@ -160,7 +161,7 @@ func TestProcessPolicyDenyEvent_RecordsToBuffer(t *testing.T) {
 	// ...but buffer should have the record.
 	records := buf.Drain()
 	require.Len(t, records, 1)
-	require.Equal(t, "egress", records[0].Direction)
+	require.Equal(t, string(networkingv1.PolicyTypeEgress), records[0].Direction)
 	require.Equal(t, "pod1", records[0].SrcName)
 	require.Equal(t, "svc1", records[0].DstName)
 	require.Equal(t, corev1.ProtocolTCP, records[0].Protocol)
