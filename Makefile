@@ -281,3 +281,17 @@ test-e2e: build-controller-image build-cniwatcher-image
 	helm dependency build charts/network-enforcer
 	@echo "🧪 Running e2e tests with '$(E2E_CNI)' CNI..."
 	go test -v ./test/e2e/... -count=1
+
+# Create kind cluster and install selected CNI with dependencies.
+# Example: `make setup-dev-cluster E2E_CNI=cilium`
+.PHONY: setup-dev-cluster
+setup-dev-cluster:
+	@echo "🛠️ Setting up dev cluster with '$(E2E_CNI)' CNI..."
+	make test-e2e E2E_INSTALL_CLUSTER_ONLY=kind
+	@echo "🛠️ Calling tilt with '$(E2E_CNI)' CNI..."
+	tilt up -- --cni=$(E2E_CNI)
+
+.PHONY: delete-dev-cluster
+delete-dev-cluster:
+	@echo "🛠️ Delete dev cluster..."
+	kind delete cluster

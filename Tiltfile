@@ -19,28 +19,11 @@ cniwatcher_settings = settings.get("cniwatcher", {})
 cniwatcher_enabled = cniwatcher_settings.get("enabled", True)
 cniwatcher_image = cniwatcher_settings.get("image", "cniwatcher")
 cniwatcher_tag = cniwatcher_settings.get("tag", "latest")
-cni_type = cniwatcher_settings.get("cniType", "calico")
 
-# OpenTelemetry Collector Deployment
-load("ext://helm_resource", "helm_resource", "helm_repo")
-helm_repo("open-telemetry", "https://open-telemetry.github.io/opentelemetry-helm-charts")
-helm_resource(
-    "opentelemetry-collector",    
-    "open-telemetry/opentelemetry-collector",
-    namespace=release_namespace,
-    flags=[
-        "--set", "image.repository=otel/opentelemetry-collector-k8s",
-        "--set", "mode=deployment",
-        "--set", "replicaCount=1",
-        "--set", "config.exporters.debug.verbosity=detailed",
-        "--set", "config.processors.memory_limiter.limit_mib=400",
-        "--set", "config.processors.memory_limiter.spike_limit_mib=100",
-        "--set", "config.processors.memory_limiter.check_interval=5s",
-        "--set", "config.service.pipelines.traces.receivers[0]=otlp",
-        "--set", "config.service.pipelines.traces.processors[0]=memory_limiter",
-        "--set", "config.service.pipelines.traces.exporters[0]=debug"
-    ]
-)
+# allow the override of the CNI from command line
+config.define_string("cni")
+cfg = config.parse()
+cni_type = cfg.get("cni") or cniwatcher_settings.get("cniType", "calico")
 
 # Prepare Helm set values based on CNI type
 helm_set_values = [
@@ -54,41 +37,11 @@ helm_set_values = [
     "cniwatcher.cniType=" + cni_type,
 	"cniwatcher.containerSecurityContext.runAsUser=null",
     "cniwatcher.podSecurityContext.runAsNonRoot=false",
-    "otel.endpoint=opentelemetry-collector." + release_namespace + ".svc.cluster.local:4317",
 ]
 
 # For development, handle CNI setup in Kind cluster
 if cniwatcher_enabled:
-    if cni_type == "cilium":
-        cilium_version = "1.19.4"
-
-        # Install and configure Cilium in Kind cluster for real development
-        helm_repo("cilium", "https://helm.cilium.io/")
-        helm_resource(
-            "cilium-helm",
-            "cilium/cilium",
-            namespace="kube-system",
-            flags=[
-                "--version", cilium_version,
-                "--set", "k8sServiceHost=kind-control-plane",
-                "--set", "k8sServicePort=6443",
-                "--set", "hubble.enabled=true"
-            ]
-        )
-
-        helm_set_values.extend([
-            "cniwatcher.cilium.hubbleEndpoint=unix:///var/run/cilium/hubble.sock"
-        ])
-    elif cni_type == "calico":
-        local_resource(
-            "setup_calico",
-            "CNIWATCHER_NAMESPACE=" + release_namespace + " bash ./hack/setup-calico.sh"
-        )
-
-        helm_set_values.extend([
-            "cniwatcher.calico.goldmaneEndpoint=goldmane.calico-system.svc:7443"
-        ])
-    elif cni_type == "flannel":
+    if cni_type == "flannel":
         local_resource(
             "setup_flannel_in_kind",
             "docker exec kind-control-plane mkdir -p /var/log/ulog && \
@@ -127,7 +80,7 @@ local_resource(
     deps=[
         "go.mod",
         "go.sum",
-        "cmd",
+        "cmd/controller",
         "api",
         "internal",
     ],

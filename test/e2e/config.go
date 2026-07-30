@@ -31,6 +31,8 @@ const (
 	// Environment variables used in e2e tests.
 	cniEnvVar        = "E2E_CNI"
 	cniVersionEnvVar = "E2E_CNI_VERSION"
+	// the value of this envVar is the name of the cluster to create.
+	installClusterOnlyEnvVar = "E2E_INSTALL_CLUSTER_ONLY"
 )
 
 type suiteConfig struct {
@@ -46,6 +48,7 @@ type suiteConfig struct {
 	cniVersion              string
 	drainFlowsInterval      time.Duration
 	wnpStatusUpdateInterval time.Duration
+	installClusterOnly      string
 }
 
 func loadSuiteConfig() suiteConfig {
@@ -63,6 +66,7 @@ func loadSuiteConfig() suiteConfig {
 		kindConfigPath:          noCNIConfigPath,
 		drainFlowsInterval:      defaultDrainFlowsInterval,
 		wnpStatusUpdateInterval: defaultWnpStatusUpdateInterval,
+		installClusterOnly:      readEnvOrDefault(installClusterOnlyEnvVar, ""),
 	}
 }
 

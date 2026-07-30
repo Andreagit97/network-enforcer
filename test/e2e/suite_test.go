@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -48,6 +49,11 @@ func TestMain(m *testing.M) {
 	})
 
 	clusterName := envconf.RandomName(testSuiteConf.namespacePrefix, 20)
+	if testSuiteConf.installClusterOnly != "" {
+		clusterName = testSuiteConf.installClusterOnly
+		// We use '^$' to run tests so that we are sure nothing will run.
+		_ = flag.Set("test.run", "^$")
+	}
 
 	setupFuncs := []env.Func{
 		envfuncs.CreateClusterWithConfig(kind.NewProvider(), clusterName, testSuiteConf.kindConfigPath),
@@ -59,22 +65,28 @@ func TestMain(m *testing.M) {
 		injectSecurityV1Alpha1Client(),
 		installCNI(),
 		installCertManager(),
-		installNetEnforcerChart(),
 	}
+	finishFuncs := []env.Func{}
 
-	finishFuncs := []env.Func{
-		envfuncs.ExportClusterLogs(clusterName, testSuiteConf.logsDir),
-		func(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
-			if suiteFailed.Load() {
-				getSetupLogger(ctx).InfoContext(
-					ctx,
-					"⏩ Skipping cluster destroy to debug",
-					"clusterName", clusterName,
-				)
-				return ctx, nil
-			}
-			return envfuncs.DestroyCluster(clusterName)(ctx, cfg)
-		},
+	if testSuiteConf.installClusterOnly == "" {
+		// We install the network-enforcer and we destroy the cluster only in case we are running tests.
+		setupFuncs = append(setupFuncs,
+			installNetEnforcerChart(),
+		)
+		finishFuncs = append(finishFuncs,
+			envfuncs.ExportClusterLogs(clusterName, testSuiteConf.logsDir),
+			func(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
+				if suiteFailed.Load() {
+					getSetupLogger(ctx).InfoContext(
+						ctx,
+						"⏩ Skipping cluster destroy to debug",
+						"clusterName", clusterName,
+					)
+					return ctx, nil
+				}
+				return envfuncs.DestroyCluster(clusterName)(ctx, cfg)
+			},
+		)
 	}
 
 	testEnv.Setup(setupFuncs...)
