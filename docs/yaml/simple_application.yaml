@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: http-service
+spec:
+  selector:
+    app: http-server
+  ports:
+    - name: tcp-echo
+      protocol: TCP
+      port: 18080
+      targetPort: 18080
+    - name: udp-echo
+      protocol: UDP
+      port: 18081
+      targetPort: 18081
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: http-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: http-server
+  template:
+    metadata:
+      labels:
+        app: http-server
+    spec:
+      containers:
+      - name: http-server
+        image: nicolaka/netshoot:v0.16
+        command:
+          - sh
+          - -c
+          - |
+            set -eu
+            # start TCP listener
+            socat -d -d TCP-LISTEN:18080,reuseaddr,fork EXEC:/bin/cat >/tmp/tcp-listener.log 2>&1 &
+            # start UDP listener
+            socat -d -d UDP-RECVFROM:18081,reuseaddr,fork EXEC:/bin/cat >/tmp/udp-listener.log 2>&1 &
+            wait
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: http-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: http-client
+  template:
+    metadata:
+      labels:
+        app: http-client
+    spec:
+      containers:
+        - image: nicolaka/netshoot:v0.16
+          name: http-client
+          command: ["sleep", "10d"]

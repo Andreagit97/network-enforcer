@@ -1,0 +1,15 @@
+= Network-Enforcer Uninstall
+
+You can remove the Network-Enforcer by uninstalling the `helm` chart as follows:
+
+```bash
+helm uninstall network-enforcer --namespace network-enforcer
+kubectl delete ns network-enforcer
+```
+
+You can also delete the cert-manager:
+
+```bash
+helm uninstall cert-manager --namespace cert-manager
+kubectl delete ns cert-manager
+```

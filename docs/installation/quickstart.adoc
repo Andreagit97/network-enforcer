@@ -1,0 +1,441 @@
+= Network-Enforcer Quick Start
+
+Welcome to the Network-Enforcer Quick Start.
+
+This guide will walk you through the following steps:
+
+* Deploying Network-Enforcer in a Kubernetes cluster.
+* Deploying a simple workload and inspecting the generated `WorkloadNetworkPolicyProposal` resources.
+* Converting `WorkloadNetworkPolicyProposal` resources into `WorkloadNetworkPolicy` resources in monitor mode and observing alerts.
+* Switching `WorkloadNetworkPolicy` resources to protect mode and seeing enforcement in action.
+
+'''
+
+== Prerequisites
+
+Before deployment, you need to prepare the following:
+
+* A Kubernetes cluster (for example, a link:https://kind.sigs.k8s.io/[kind] cluster) with Calico or Cilium as CNI.
+* `helm` installed locally
+* `kubectl` installed locally
+* `cert-manager` and `cert-manager-csi-driver` installed in the cluster
+
+=== Install a kind cluster with Calico
+
+As an example, use the following commands to install a kind cluster with Calico CNI:
+
+```bash
+kind create cluster --config=https://raw.githubusercontent.com/rancher-sandbox/network-enforcer/main/docs/yaml/kind_cluster.yaml
+# Create the namespace before deployment.
+# This is required because we create a Secret there to access the Calico Goldmane service.
+kubectl create namespace network-enforcer
+./hack/setup-calico.sh
+```
+
+The script installs the Tigera operator and creates the Secret used by Network-Enforcer. Check the script for details.
+
+Once everything is set up and running, you can proceed with the next step.
+
+=== Install cert-manager and cert-manager-csi-driver
+
+To install cert-manager, you can run the following commands:
+
+```bash
+helm repo add jetstack https://charts.jetstack.io
+
+helm repo update
+
+helm install cert-manager jetstack/cert-manager \
+	--namespace cert-manager \
+	--create-namespace \
+	--set crds.enabled=true \
+	--wait
+```
+
+[NOTE]
+====
+For more information on configuring cert-manager, please visit the link:https://cert-manager.io/docs/installation/helm[cert-manager documentation].
+====
+
+The `cert-manager-csi-driver` is used to automatically provision and mount TLS certificates directly inside Network-Enforcer pods, without creating intermediate Secret resources.
+To install it, run the following commands:
+
+```bash
+helm install cert-manager-csi-driver jetstack/cert-manager-csi-driver \
+	--namespace cert-manager \
+	--wait
+```
+
+== Deploy Network-Enforcer
+
+Follow these simple steps from your local machine to get Network-Enforcer up and running:
+
+=== Install the Helm chart
+
+```bash
+helm repo add network-enforcer https://rancher-sandbox.github.io/network-enforcer/
+helm repo update
+helm install network-enforcer network-enforcer/network-enforcer \
+  --namespace network-enforcer \
+  --set cniwatcher.cniType=calico \
+  --set obi.config.data.otel_metrics_export.interval=3s \
+  --set controller.drainFlowsInterval=3s \
+  --set controller.wnpStatusUpdateInterval=3s \
+  --create-namespace \
+  --wait
+```
+
+Some intervals are reduced through `--set` to make the demo quick and responsive.
+In production, you usually do not need to change these values unless you want custom behavior.
+
+[NOTE]
+====
+Remember to set the `cniwatcher.cniType` to the CNI you are using.
+====
+
+=== Verify the Deployment
+
+After installation, ensure all pods are running:
+
+```bash
+kubectl get pods -n network-enforcer
+```
+
+Example output:
+
+```bash
+NAME                                                   READY   STATUS    RESTARTS   AGE
+network-enforcer-cniwatcher-fpw7k                      1/1     Running   0          23s
+network-enforcer-controller-manager-7888c846df-nb6pv   1/1     Running   0          23s
+network-enforcer-obi-56pz8                             1/1     Running   0          23s
+network-enforcer-otel-collector-69d5c46886-qggqs       1/1     Running   0          23s
+```
+
+=== Summary
+
+At this point, Network-Enforcer is up and running, and you are ready to write policies.
+
+== Generate WorkloadNetworkPolicyProposal resources
+
+When Network-Enforcer starts, it observes connections into the cluster.
+For each endpoint of the connection, it creates a `WorkloadNetworkPolicyProposal` containing the list of observed network connections.
+For a simple TCP connection from deployment A to deployment B, Network-Enforcer creates a `WorkloadNetworkPolicyProposal` for A (allowing traffic to B) and one for B (allowing traffic from A).
+
+=== Deploy a simple application
+
+Let's create a simple application with a client, a server and a service.
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/rancher-sandbox/network-enforcer/main/docs/yaml/simple_application.yaml
+kubectl wait --for=condition=Ready pod -l app=http-server --timeout=300s
+kubectl wait --for=condition=Ready pod -l app=http-client --timeout=300s
+```
+
+=== Proposal generation
+
+We first generate some traffic from client to server:
+
+```bash
+kubectl exec deployments/http-client -it -- sh -c 'printf send-tcp-traffic | nc -w 1 http-service 18080'
+```
+
+After a few seconds, you should see two `WorkloadNetworkPolicyProposal` resources created.
+
+```bash
+# where `wnpp` is the short name for workloadnetworkpolicyproposals.security.rancher.io
+kubectl get wnpp deployment-http-client-egress deployment-http-server-ingress -o yaml
+```
+
+```yaml
+- apiVersion: security.rancher.io/v1alpha1
+  kind: WorkloadNetworkPolicyProposal
+  metadata:
+    creationTimestamp: "2026-07-30T10:29:02Z"
+    generation: 1
+    name: deployment-http-client-egress
+    namespace: default
+    resourceVersion: "4026"
+    uid: c9f7f6b3-aa71-4257-be88-701e3598e9f7
+  spec:
+    egress:
+    - ports:
+      - port: 18080
+        protocol: TCP
+      to:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: default
+        podSelector:
+          matchLabels:
+            app: http-server
+    - ports:
+      - port: 53
+        protocol: UDP
+      to:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system
+        podSelector:
+          matchLabels:
+            k8s-app: kube-dns
+    podSelector:
+      matchLabels:
+        app: http-client
+    policyTypes:
+    - Egress
+- apiVersion: security.rancher.io/v1alpha1
+  kind: WorkloadNetworkPolicyProposal
+  metadata:
+    creationTimestamp: "2026-07-30T10:29:02Z"
+    generation: 1
+    name: deployment-http-server-ingress
+    namespace: default
+    resourceVersion: "4027"
+    uid: 84ec2d80-5e68-4bea-8c9b-9efaeedb93cc
+  spec:
+    ingress:
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: default
+        podSelector:
+          matchLabels:
+            app: http-client
+      ports:
+      - port: 18080
+        protocol: TCP
+    podSelector:
+      matchLabels:
+        app: http-server
+    policyTypes:
+    - Ingress
+```
+
+Proposals summary:
+* Proposal for the client allowing connections to the server and to CoreDNS.
+* Proposal for the server allowing connections from the client.
+
+Some notes:
+* The layout of the proposal is the same as a standard Kubernetes NetworkPolicy resource.
+* As the name suggests, this is only a proposal and not a definitive policy yet, so nothing is enforced at this stage. To enforce it, create a `WorkloadNetworkPolicy`.
+* This proposal is tied to a specific workload. Its name is always in the form of `<workload-kind>-<workload-name>-<traffic-direction>`.
+
+== WorkloadNetworkPolicy (monitor mode)
+
+These proposals look reasonable for our application, so the next step is to convert them into definitive policies.
+To do that, label the `WorkloadNetworkPolicyProposal` resources with `security.rancher.io/promote=true`.
+
+```bash
+kubectl label wnpp deployment-http-client-egress deployment-http-server-ingress security.rancher.io/promote=true
+```
+
+After a few seconds, you should see two new `WorkloadNetworkPolicy` resources.
+
+```bash
+kubectl get wnp deployment-http-client-egress deployment-http-server-ingress -o yaml
+```
+
+```yaml
+- apiVersion: security.rancher.io/v1alpha1
+  kind: WorkloadNetworkPolicy
+  metadata:
+    creationTimestamp: "2026-07-30T10:31:16Z"
+    generation: 1
+    labels:
+      security.rancher.io/promoted-from: deployment-http-client-egress
+    name: deployment-http-client-egress
+    namespace: default
+    resourceVersion: "4364"
+    uid: fee577bd-35e3-47f3-9a2f-bccb6a10187f
+  spec:
+    mode: monitor
+    policyTemplate:
+      egress:
+      - ports:
+        - port: 18080
+          protocol: TCP
+        to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+          podSelector:
+            matchLabels:
+              app: http-server
+      - ports:
+        - port: 53
+          protocol: UDP
+        to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      podSelector:
+        matchLabels:
+          app: http-client
+      policyTypes:
+      - Egress
+  status:
+    activeViolationCount: 0
+    observedGeneration: 1
+    violationCount: 0
+- apiVersion: security.rancher.io/v1alpha1
+  kind: WorkloadNetworkPolicy
+  metadata:
+    creationTimestamp: "2026-07-30T10:31:16Z"
+    generation: 1
+    labels:
+      security.rancher.io/promoted-from: deployment-http-server-ingress
+    name: deployment-http-server-ingress
+    namespace: default
+    resourceVersion: "4365"
+    uid: 53580edc-8bb0-4484-ac88-0166b22239d9
+  spec:
+    mode: monitor
+    policyTemplate:
+      ingress:
+      - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+          podSelector:
+            matchLabels:
+              app: http-client
+        ports:
+        - port: 18080
+          protocol: TCP
+      podSelector:
+        matchLabels:
+          app: http-server
+      policyTypes:
+      - Ingress
+  status:
+    activeViolationCount: 0
+    observedGeneration: 1
+    violationCount: 0
+```
+
+The syntax is very similar to the proposal, but there is one important difference: `spec.mode: monitor`.
+`monitor` is a passive mode: violations of the policy are reported but not blocked.
+This means that if a connection attempt violates the policy, it will be reported in policy status, but it will not be blocked.
+Let's try it by generating UDP traffic from the client to the server.
+
+```bash
+kubectl exec deployments/http-client -it -- sh -c 'printf send-udp-traffic | nc -u -w 1 http-service 18081'
+```
+
+Now check the violation reported in the client policy status.
+
+```bash
+kubectl get workloadnetworkpolicy deployment-http-client-egress -o yaml | grep violations -A 20
+```
+
+```yaml
+  violations:
+  - action: monitor
+    denyingPolicyName: deployment-http-client-egress
+    denyingPolicyNamespace: default
+    dest:
+      namespace: default
+      ownerName: http-server
+    direction: Egress
+    dstPort: 18081
+    id: 0
+    nodeName: ""
+    protocol: UDP
+    source:
+      namespace: default
+      ownerName: http-client
+    timestamp: "2026-07-30T10:36:35Z"
+```
+
+This is exactly the UDP flow we just generated.
+You should see the same thing on the server side.
+
+```bash
+kubectl get workloadnetworkpolicy deployment-http-server-ingress -o yaml | grep violations -A 20
+```
+
+```yaml
+  violations:
+  - action: monitor
+    denyingPolicyName: deployment-http-server-ingress
+    denyingPolicyNamespace: default
+    dest:
+      namespace: default
+      ownerName: http-server
+    direction: Ingress
+    dstPort: 18081
+    id: 0
+    nodeName: ""
+    protocol: UDP
+    source:
+      namespace: default
+      ownerName: http-client
+    timestamp: "2026-07-30T10:37:41Z"
+```
+
+== WorkloadNetworkPolicy (protect mode)
+
+Once you are confident with the policy and want to enforce it, change the mode to `protect`.
+From that point, every new violation is blocked.
+
+```bash
+kubectl patch wnp deployment-http-client-egress deployment-http-server-ingress --type='json' -p='[{"op": "replace", "path": "/spec/mode", "value": "protect"}]'
+```
+
+Now test allowed traffic again: nothing should be reported.
+
+```bash
+kubectl exec deployments/http-client -it -- sh -c 'printf send-tcp-traffic | nc -w 1 http-service 18080'
+```
+
+This time, generate disallowed traffic: it should be blocked.
+
+```bash
+kubectl exec deployments/http-client -it -- sh -c 'printf send-udp-traffic | nc -u -w 1 http-service 18081'
+```
+
+If you check the resource status again, you should see output similar to this:
+
+```bash
+kubectl get workloadnetworkpolicy deployment-http-client-egress -o yaml | grep violations -A 50
+```
+
+```yaml
+  violations:
+  - action: protect
+    denyingPolicyName: deployment-http-client-egress
+    denyingPolicyNamespace: default
+    dest:
+      namespace: '-' # todo!: fix this
+      ownerName: pvt
+    direction: Egress
+    dstPort: 18081
+    id: 105
+    nodeName: kind-control-plane
+    protocol: UDP
+    source:
+      namespace: default
+      ownerName: http-client-66dcd49f58-*
+    timestamp: "2026-07-30T10:41:15Z"
+  - action: monitor
+    denyingPolicyName: deployment-http-client-egress
+    denyingPolicyNamespace: default
+    dest:
+      namespace: default
+      ownerName: http-server
+    direction: Egress
+    dstPort: 18081
+    id: 0
+    nodeName: ""
+    protocol: UDP
+    source:
+      namespace: default
+      ownerName: http-client
+    timestamp: "2026-07-30T10:37:41Z"
+```
+
+In protect mode, only the egress policy shows new violations because traffic is blocked at the source.
+The ingress policy is not violated because disallowed traffic never reaches the destination.
