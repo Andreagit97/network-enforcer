@@ -59,6 +59,7 @@ func TestCompleteFlow(t *testing.T) {
 				}, defaultOperationTimeout, 1*time.Second, "UDP traffic is not blocked in protect mode")
 				return ctx
 			}).
+		Assess("Check policy deny appears on OTEL collector", checkPolicyDenyOTLPLog).
 		Assess("Check violations are reported", checkViolations).
 		Assess("Check TCP traffic is still allowed",
 			func(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {

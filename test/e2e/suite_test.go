@@ -147,6 +147,14 @@ func installNetEnforcerChart() env.Func {
 			return ctx, fmt.Errorf("wait network enforcer daemonset ready: %w", err)
 		}
 
+		logger.InfoContext(ctx, "⏲️ waiting for otel collector")
+		if err = wait.For(
+			conditions.New(r).DeploymentAvailable(defaultOTelCollectorDeploymentName, testCfg.releaseNS),
+			wait.WithTimeout(defaultOperationTimeout),
+		); err != nil {
+			return ctx, fmt.Errorf("wait otel collector deployment ready: %w", err)
+		}
+
 		return ctx, nil
 	}
 }

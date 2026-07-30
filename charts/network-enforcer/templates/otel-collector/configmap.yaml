@@ -15,6 +15,28 @@ data:
             tls:
               cert_file: {{ include "network-enforcer.otelCollector.certDir" . }}/tls.crt
               key_file: {{ include "network-enforcer.otelCollector.certDir" . }}/tls.key
+    connectors:
+      count:
+        logs:
+          network_enforcer_policy_denies:
+            description: "Total network policy deny events observed by cniwatcher"
+            conditions:
+              - 'attributes["cni.type"] != nil'
+            attributes:
+              - key: cni.type
+              - key: network.protocol
+              - key: node.name
+              - key: source.namespace
+              - key: source.name
+              - key: destination.namespace
+              - key: destination.name
+              - key: destination.port
+                default_value: "0"
+              # Slice attrs are stringified as JSON arrays on the Prometheus
+              # label (e.g. ["app=http-client"]). default_value keeps the
+              # datapoint when the OTLP log omits an optional slice.
+              - key: egress.enforced_by
+                default_value: ""
     processors:
       deltatocumulative: {}
     extensions:
@@ -30,9 +52,9 @@ data:
       pipelines:
         logs:
           receivers: [otlp]
-          exporters: [debug]
+          exporters: [count, debug]
         metrics:
-          receivers: [otlp]
+          receivers: [count, otlp]
           processors: [deltatocumulative]
           exporters: [prometheus]
 {{- end }}
