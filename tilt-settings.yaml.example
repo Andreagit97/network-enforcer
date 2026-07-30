@@ -5,7 +5,6 @@ controller:
   image: controller
 
 cniwatcher:
-  enabled: true
   image: cniwatcher
   tag: latest
   cniType: calico  # aws-vpc, calico, cilium, or flannel

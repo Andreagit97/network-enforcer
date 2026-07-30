@@ -16,7 +16,6 @@ namespace_create(release_namespace)
 controller_image = settings.get("controller").get("image")
 
 cniwatcher_settings = settings.get("cniwatcher", {})
-cniwatcher_enabled = cniwatcher_settings.get("enabled", True)
 cniwatcher_image = cniwatcher_settings.get("image", "cniwatcher")
 cniwatcher_tag = cniwatcher_settings.get("tag", "latest")
 
@@ -31,7 +30,6 @@ helm_set_values = [
     "controller.replicas=1",
     "controller.containerSecurityContext.runAsUser=null",
     "controller.podSecurityContext.runAsNonRoot=false",
-    "cniwatcher.enabled=" + ("true" if cniwatcher_enabled else "false"),
     "cniwatcher.image.repository=" + cniwatcher_image,
     "cniwatcher.image.tag=" + cniwatcher_tag,
     "cniwatcher.cniType=" + cni_type,
@@ -40,29 +38,28 @@ helm_set_values = [
 ]
 
 # For development, handle CNI setup in Kind cluster
-if cniwatcher_enabled:
-    if cni_type == "flannel":
-        local_resource(
-            "setup_flannel_in_kind",
-            "docker exec kind-control-plane mkdir -p /var/log/ulog && \
-             docker exec kind-control-plane touch /var/log/ulog/syslogemu.log && \
-             docker exec kind-control-plane sh -c 'echo \"Jan 1 12:00:00 fake-host kernel: [12345.678901] \
-                DROP by policy default/allow-all IN=eth0 OUT=eth1 MAC=00:11:22:33:44:55 SRC=192.168.1.100 \
-                DST=192.168.1.200 PROTO=TCP SPT=12345 DPT=80\" > /var/log/ulog/syslogemu.log'",
-        )
+if cni_type == "flannel":
+	local_resource(
+		"setup_flannel_in_kind",
+		"docker exec kind-control-plane mkdir -p /var/log/ulog && \
+			docker exec kind-control-plane touch /var/log/ulog/syslogemu.log && \
+			docker exec kind-control-plane sh -c 'echo \"Jan 1 12:00:00 fake-host kernel: [12345.678901] \
+			DROP by policy default/allow-all IN=eth0 OUT=eth1 MAC=00:11:22:33:44:55 SRC=192.168.1.100 \
+			DST=192.168.1.200 PROTO=TCP SPT=12345 DPT=80\" > /var/log/ulog/syslogemu.log'",
+	)
 
-        helm_set_values.extend([
-            "cniwatcher.podSecurityContext.fsGroup=4"
-        ])
-    elif cni_type == "aws-vpc":
-        local_resource(
-            "setup_aws_vpc_in_kind",
-            "docker exec kind-control-plane mkdir -p /var/log/aws-routed-eni && \
-             docker exec kind-control-plane touch /var/log/aws-routed-eni/network-policy-agent.log && \
-             docker exec kind-control-plane sh -c 'echo \"2024-01-01T12:00:00Z [INFO] DROP by policy \
-                default/aws-policy IN=eni-12345 OUT=eni-67890 SRC=10.0.1.100 DST=10.0.1.200 PROTO=TCP \
-                SPT=12345 DPT=80\" > /var/log/aws-routed-eni/network-policy-agent.log'",
-        )
+	helm_set_values.extend([
+		"cniwatcher.podSecurityContext.fsGroup=4"
+	])
+elif cni_type == "aws-vpc":
+	local_resource(
+		"setup_aws_vpc_in_kind",
+		"docker exec kind-control-plane mkdir -p /var/log/aws-routed-eni && \
+			docker exec kind-control-plane touch /var/log/aws-routed-eni/network-policy-agent.log && \
+			docker exec kind-control-plane sh -c 'echo \"2024-01-01T12:00:00Z [INFO] DROP by policy \
+			default/aws-policy IN=eni-12345 OUT=eni-67890 SRC=10.0.1.100 DST=10.0.1.200 PROTO=TCP \
+			SPT=12345 DPT=80\" > /var/log/aws-routed-eni/network-policy-agent.log'",
+	)
 
 yaml = helm(
     "./charts/network-enforcer",
@@ -105,33 +102,32 @@ docker_build_with_restart(
     ],
 )
 
-if cniwatcher_enabled:
-    local_resource(
-        "cniwatcher_tilt",
-        "make cniwatcher",
-        deps=[
-            "go.mod",
-            "go.sum",
-            "cmd/cniwatcher",
-            "internal/cniwatcher",
-            "internal/otel",
-            "internal/types",
-        ],
-    )
-    entrypoint = ["/cniwatcher"]
-    dockerfile = "./hack/Dockerfile.cniwatcher.tilt"
+local_resource(
+	"cniwatcher_tilt",
+	"make cniwatcher",
+	deps=[
+		"go.mod",
+		"go.sum",
+		"cmd/cniwatcher",
+		"internal/cniwatcher",
+		"internal/otel",
+		"internal/types",
+	],
+)
+entrypoint = ["/cniwatcher"]
+dockerfile = "./hack/Dockerfile.cniwatcher.tilt"
 
-    docker_build_with_restart(
-        cniwatcher_image + ":" + cniwatcher_tag,
-        ".",
-        dockerfile=dockerfile,
-        entrypoint=entrypoint,
-        # `only` here is important, otherwise, the container will get updated
-        # on _any_ file change.
-        only=[
-            "./bin/cniwatcher",
-        ],
-        live_update=[
-            sync("./bin/cniwatcher", "/cniwatcher"),
-        ],
-    )
+docker_build_with_restart(
+	cniwatcher_image + ":" + cniwatcher_tag,
+	".",
+	dockerfile=dockerfile,
+	entrypoint=entrypoint,
+	# `only` here is important, otherwise, the container will get updated
+	# on _any_ file change.
+	only=[
+		"./bin/cniwatcher",
+	],
+	live_update=[
+		sync("./bin/cniwatcher", "/cniwatcher"),
+	],
+)

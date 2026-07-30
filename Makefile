@@ -74,10 +74,6 @@ manifests: controller-gen ## Generate CRDs and RBAC.
 		charts/network-enforcer/templates/cniwatcher/role.yaml
 	sed -i '/^  name:/a\  labels:\n  {{- include "network-enforcer.labels" . | nindent 4 }}' \
 		charts/network-enforcer/templates/cniwatcher/role.yaml
-	# Wrap with enabled conditional
-	sed -i '1s/^/{{- if .Values.cniwatcher.enabled }}\n/' \
-		charts/network-enforcer/templates/cniwatcher/role.yaml
-	echo '{{- end }}' >> charts/network-enforcer/templates/cniwatcher/role.yaml
 
 .PHONY: generate
 generate: manifests controller-gen generate-chart-values ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
