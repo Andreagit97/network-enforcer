@@ -189,7 +189,7 @@ func newViolationRecord(
 	direction networkingv1.PolicyType,
 	peer topology.Peer,
 ) violationbuf.ViolationRecord {
-	return violationbuf.ViolationRecord{
+	violation := violationbuf.ViolationRecord{
 		Timestamp:              time.Now(),
 		NodeName:               "", // we don't populate it at the moment, since we don't really need it.
 		Direction:              string(direction),
@@ -203,6 +203,15 @@ func newViolationRecord(
 		DenyingPolicyNamespace: workload.Namespace,
 		DenyingPolicyName:      policyName,
 	}
+	// the src and dst are already in the right order if the direction is egress.
+	// example: client (src) -> server (dst)
+	// In case of ingress direction we have this:
+	// example: server (src) -> client (dst)
+	// so we need to invert src and dst
+	if direction == networkingv1.PolicyTypeIngress {
+		violation.SrcNamespace, violation.SrcName, violation.DstNamespace, violation.DstName = violation.DstNamespace, violation.DstName, violation.SrcNamespace, violation.SrcName
+	}
+	return violation
 }
 
 func (ts *TopologyScanner) getMonitorViolations(
