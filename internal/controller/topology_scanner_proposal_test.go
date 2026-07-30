@@ -237,7 +237,7 @@ func TestTopologyScannerReconcileConnection(t *testing.T) {
 				require.Len(t, records, 1)
 				require.Equal(t, workload.OwnerName, records[0].SrcName)
 				require.Equal(t, peer.OwnerName, records[0].DstName)
-				require.Equal(t, string(networkingv1.PolicyTypeEgress), records[0].Direction)
+				require.Equal(t, networkingv1.PolicyTypeEgress, records[0].Direction)
 				require.Equal(t, expectedEgressProposal.Name, records[0].DenyingPolicyName)
 			},
 		},

@@ -101,16 +101,16 @@ func (w *Watcher) ProcessPolicyDenyEvent(event *types.PolicyDenyEvent) error {
 }
 
 func (w *Watcher) recordToBuffer(event *types.PolicyDenyEvent) {
-	direction := ""
+	var direction networkingv1.PolicyType
 	denyingPolicyNamespace := ""
 	denyingPolicyName := ""
 
 	if len(event.EgressEnforcedBy) > 0 {
-		direction = string(networkingv1.PolicyTypeEgress)
+		direction = networkingv1.PolicyTypeEgress
 		denyingPolicyNamespace = event.EgressEnforcedBy[0].Namespace
 		denyingPolicyName = event.EgressEnforcedBy[0].Name
 	} else if len(event.IngressEnforcedBy) > 0 {
-		direction = string(networkingv1.PolicyTypeIngress)
+		direction = networkingv1.PolicyTypeIngress
 		denyingPolicyNamespace = event.IngressEnforcedBy[0].Namespace
 		denyingPolicyName = event.IngressEnforcedBy[0].Name
 	}

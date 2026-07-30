@@ -32,7 +32,7 @@ type ViolationRecord struct {
 	Timestamp *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	// Node whose cniwatcher reported the violation.
 	NodeName string `protobuf:"bytes,2,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
-	// Direction of the flow: "egress" or "ingress".
+	// Direction of the flow: "Egress" or "Ingress"
 	Direction string `protobuf:"bytes,3,opt,name=direction,proto3" json:"direction,omitempty"`
 	// Source endpoint.
 	SourceNamespace string   `protobuf:"bytes,4,opt,name=source_namespace,json=sourceNamespace,proto3" json:"source_namespace,omitempty"`

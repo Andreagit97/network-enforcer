@@ -18,7 +18,7 @@ func mkViolation() ViolationRecord {
 		ID:        0,
 		Timestamp: metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
 		NodeName:  "node-1",
-		Direction: "egress",
+		Direction: networkingv1.PolicyTypeEgress,
 		Source: WorkloadRef{
 			Namespace: "ns1",
 			OwnerKind: "Deployment",
@@ -51,7 +51,7 @@ func (r ViolationRecord) withTimestamp(ts time.Time) ViolationRecord {
 
 // withIngress returns a copy with direction set to ingress.
 func (r ViolationRecord) withIngress() ViolationRecord {
-	r.Direction = "ingress"
+	r.Direction = networkingv1.PolicyTypeIngress
 	return r
 }
 
@@ -450,7 +450,7 @@ func TestAcknowledgeViolationsFromAnnotations(t *testing.T) {
 			ID:        id,
 			Timestamp: metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
 			NodeName:  "node-1",
-			Direction: "egress",
+			Direction: networkingv1.PolicyTypeEgress,
 			Source: WorkloadRef{
 				Namespace: "ns1",
 				OwnerKind: "Deployment",

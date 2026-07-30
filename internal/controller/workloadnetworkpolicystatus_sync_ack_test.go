@@ -11,6 +11,7 @@ import (
 	otellog "go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/embedded"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -100,7 +101,7 @@ func ackTestViolation(denyingPolicyName string) securityv1alpha1.ViolationRecord
 	return securityv1alpha1.ViolationRecord{
 		Timestamp: metav1.NewTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
 		NodeName:  "node-1",
-		Direction: "egress",
+		Direction: networkingv1.PolicyTypeEgress,
 		Source: securityv1alpha1.WorkloadRef{
 			Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
 		},
@@ -207,7 +208,7 @@ func TestAcknowledgedViolationEventShape(t *testing.T) {
 
 	require.Equal(t, "0", attrs["id"])
 	require.Equal(t, "known issue", attrs["reason"])
-	require.Equal(t, "egress", attrs["direction"])
+	require.Equal(t, string(networkingv1.PolicyTypeEgress), attrs["direction"])
 	require.Equal(t, "src-ns", attrs["source.namespace"])
 	require.Equal(t, "Deployment", attrs["source.workload.kind"])
 	require.Equal(t, "app", attrs["source.workload.name"])

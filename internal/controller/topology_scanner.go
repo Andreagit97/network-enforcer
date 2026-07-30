@@ -162,7 +162,7 @@ func (ts *TopologyScanner) sendMonitorViolations(
 		rec.SetTimestamp(time.Now())
 		rec.AddAttributes(
 			otellog.String("timestamp", violation.Timestamp.UTC().Format(time.RFC3339)),
-			otellog.String("direction", violation.Direction),
+			otellog.String("direction", string(violation.Direction)),
 			otellog.String("source.namespace", violation.SrcNamespace),
 			// todo!: the `violationbuf.ViolationRecord` doesn't contain a `kind` field,
 			// we need to understand what we want as final format.
@@ -192,7 +192,7 @@ func newViolationRecord(
 	violation := violationbuf.ViolationRecord{
 		Timestamp:              time.Now(),
 		NodeName:               "", // we don't populate it at the moment, since we don't really need it.
-		Direction:              string(direction),
+		Direction:              direction,
 		SrcNamespace:           workload.Namespace,
 		SrcName:                workload.OwnerName,
 		DstNamespace:           peer.Namespace,

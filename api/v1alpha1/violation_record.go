@@ -11,11 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
-const (
-	DirectionEgress  = "egress"
-	DirectionIngress = "ingress"
-)
-
 // annotationInfo groups an annotation key with its acknowledge-reason pair.
 type annotationInfo struct {
 	annotationKey string
@@ -24,7 +19,7 @@ type annotationInfo struct {
 
 // ViolationRecordKey is the dedup key for recognising the same logical violation across scrapes.
 type ViolationRecordKey struct {
-	Direction              string
+	Direction              networkingv1.PolicyType
 	SrcNamespace           string
 	SrcOwnerKind           string
 	SrcOwnerName           string
@@ -61,13 +56,13 @@ func (v ViolationRecord) Key() ViolationRecordKey {
 func (wnp *WorkloadNetworkPolicy) clearAllowedViolations() {
 	wnp.Status.Violations = slices.DeleteFunc(wnp.Status.Violations, func(v ViolationRecord) bool {
 		switch v.Direction {
-		case DirectionEgress:
+		case networkingv1.PolicyTypeEgress:
 			for _, rule := range wnp.Spec.PolicyTemplate.Egress {
 				if EgressRuleEqual(v.ToEgressRule(), rule) {
 					return true
 				}
 			}
-		case DirectionIngress:
+		case networkingv1.PolicyTypeIngress:
 			for _, rule := range wnp.Spec.PolicyTemplate.Ingress {
 				if IngressRuleEqual(v.ToIngressRule(), rule) {
 					return true
