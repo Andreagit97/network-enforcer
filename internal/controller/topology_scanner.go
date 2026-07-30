@@ -262,9 +262,10 @@ func (ts *TopologyScanner) reconcileConnection(
 
 	// we first check if we already have a policy associated to the workload.
 	// we use the promoted label to associate the policy with the proposal.
-	policies, err := checkExistingPolicy(ctx, ts.client, workload.Namespace, getProposalName(workload, direction))
+	proposalName := getProposalName(workload, direction)
+	policies, err := checkExistingPolicy(ctx, ts.client, workload.Namespace, proposalName)
 	if err != nil {
-		return errors.New("could not check existing policies")
+		return fmt.Errorf("checking existing policies for %s/%s: %w", workload.Namespace, proposalName, err)
 	}
 
 	switch len(policies) {
