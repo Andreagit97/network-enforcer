@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -17,6 +18,7 @@ import (
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/ownerkind"
 	"github.com/rancher-sandbox/network-enforcer/internal/topology"
+	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
 )
 
 func newDeployment(namespace, name string, selector map[string]string) *appsv1.Deployment {
@@ -35,10 +37,14 @@ func newTestTopologyScanner(t *testing.T, objs ...client.Object) *TopologyScanne
 
 	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
 
-	return &TopologyScanner{client: cl}
+	return &TopologyScanner{
+		client:                 cl,
+		log:                    slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelDebug})),
+		monitorViolationBuffer: violationbuf.NewBuffer(),
+	}
 }
 
-func TestTopologyScannerReconcileProposal(t *testing.T) {
+func TestTopologyScannerReconcileConnection(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -63,7 +69,7 @@ func TestTopologyScannerReconcileProposal(t *testing.T) {
 		DstPort:  443,
 		Protocol: corev1.ProtocolTCP,
 	}
-	expectedProposal := &securityv1alpha1.WorkloadNetworkPolicyProposal{
+	expectedEgressProposal := &securityv1alpha1.WorkloadNetworkPolicyProposal{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      getProposalName(workload, networkingv1.PolicyTypeEgress),
 			Namespace: workload.Namespace,
@@ -95,50 +101,178 @@ func TestTopologyScannerReconcileProposal(t *testing.T) {
 			},
 		},
 	}
-	promotedPolicy := &securityv1alpha1.WorkloadNetworkPolicy{
+	expectedIngressProposal := &securityv1alpha1.WorkloadNetworkPolicyProposal{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      expectedProposal.Name,
-			Namespace: expectedProposal.Namespace,
+			Name:      getProposalName(workload, networkingv1.PolicyTypeIngress),
+			Namespace: workload.Namespace,
 		},
-		Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
-			Mode:           securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
-			PolicyTemplate: expectedProposal.Spec,
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{MatchLabels: workloadLabels},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{{
+				From: []networkingv1.NetworkPolicyPeer{{
+					NamespaceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{corev1.LabelMetadataName: defaultNamespace},
+					},
+					PodSelector: &metav1.LabelSelector{MatchLabels: peerLabels},
+				}},
+				Ports: []networkingv1.NetworkPolicyPort{{
+					Protocol: protocolPtr(peer.Protocol),
+					Port:     portPtr(peer.DstPort),
+				}},
+			}},
 		},
 	}
-	require.NoError(t, promotedPolicy.SetPromotedLabel(expectedProposal.Name))
+
+	newPromotedPolicy := func(
+		t *testing.T,
+		proposalName string,
+		mode securityv1alpha1.WorkloadNetworkPolicyMode,
+		template networkingv1.NetworkPolicySpec,
+	) *securityv1alpha1.WorkloadNetworkPolicy {
+		t.Helper()
+
+		policy := &securityv1alpha1.WorkloadNetworkPolicy{
+			// policy has the same name of the proposal
+			ObjectMeta: metav1.ObjectMeta{Name: proposalName, Namespace: workload.Namespace},
+			Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
+				Mode:           mode,
+				PolicyTemplate: template,
+			},
+		}
+		require.NoError(t, policy.SetPromotedLabel(proposalName))
+		return policy
+	}
+
+	newMissingRuleTemplate := func() networkingv1.NetworkPolicySpec {
+		template := expectedEgressProposal.Spec
+		template.Egress = []networkingv1.NetworkPolicyEgressRule{{
+			To: []networkingv1.NetworkPolicyPeer{{
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{corev1.LabelMetadataName: defaultNamespace},
+				},
+				PodSelector: &metav1.LabelSelector{MatchLabels: peerLabels},
+			}},
+			Ports: []networkingv1.NetworkPolicyPort{{
+				Protocol: protocolPtr(corev1.ProtocolTCP),
+				Port:     portPtr(8443),
+			}},
+		}}
+		return template
+	}
 
 	tests := []struct {
-		name   string
-		setup  func() []client.Object
-		assert func(*testing.T, *TopologyScanner)
+		name             string
+		direction        networkingv1.PolicyType
+		initialObjects   func(t *testing.T) []client.Object
+		wantErrContains  string
+		wantProposal     *securityv1alpha1.WorkloadNetworkPolicyProposal
+		assertViolations func(*testing.T, []violationbuf.ViolationRecord)
 	}{
 		{
-			// No policy in the cluster so we expect the creation of a new proposal
-			name: "proposal_is_created",
-			setup: func() []client.Object {
+			name:      "proposal_is_created_egress",
+			direction: networkingv1.PolicyTypeEgress,
+			initialObjects: func(_ *testing.T) []client.Object {
 				return []client.Object{
-					// We need the deployment to get the label selectors
 					newDeployment(workload.Namespace, workload.OwnerName, workloadLabels),
 					newDeployment(peer.Namespace, peer.OwnerName, peerLabels),
 				}
 			},
-			assert: func(t *testing.T, scanner *TopologyScanner) {
-				var proposal securityv1alpha1.WorkloadNetworkPolicyProposal
-				require.NoError(t, scanner.client.Get(t.Context(), expectedProposal.NamespacedName(), &proposal))
-				require.Equal(t, expectedProposal.Spec, proposal.Spec)
+			wantProposal: expectedEgressProposal,
+		},
+		{
+			name:      "proposal_is_created_ingress",
+			direction: networkingv1.PolicyTypeIngress,
+			initialObjects: func(_ *testing.T) []client.Object {
+				return []client.Object{
+					newDeployment(workload.Namespace, workload.OwnerName, workloadLabels),
+					newDeployment(peer.Namespace, peer.OwnerName, peerLabels),
+				}
+			},
+			wantProposal: expectedIngressProposal,
+		},
+		{
+			name:      "policy_already_exists_protect_mode",
+			direction: networkingv1.PolicyTypeEgress,
+			initialObjects: func(t *testing.T) []client.Object {
+				return []client.Object{newPromotedPolicy(
+					t,
+					expectedEgressProposal.Name,
+					securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+					expectedEgressProposal.Spec,
+				)}
 			},
 		},
 		{
-			name: "policy_already_exists",
-			setup: func() []client.Object {
-				return []client.Object{promotedPolicy}
+			name:      "policy_already_exists_monitor_mode_no_violations",
+			direction: networkingv1.PolicyTypeEgress,
+			initialObjects: func(t *testing.T) []client.Object {
+				return []client.Object{
+					newDeployment(peer.Namespace, peer.OwnerName, peerLabels),
+					newPromotedPolicy(
+						t,
+						expectedEgressProposal.Name,
+						securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
+						expectedEgressProposal.Spec,
+					),
+				}
 			},
-			assert: func(t *testing.T, scanner *TopologyScanner) {
-				var proposal securityv1alpha1.WorkloadNetworkPolicyProposal
-				err := scanner.client.Get(t.Context(), expectedProposal.NamespacedName(), &proposal)
-				require.Error(t, err)
-				require.True(t, apierrors.IsNotFound(err))
+		},
+		{
+			name:      "policy_already_exists_monitor_mode_records_violation",
+			direction: networkingv1.PolicyTypeEgress,
+			initialObjects: func(t *testing.T) []client.Object {
+				return []client.Object{
+					newDeployment(peer.Namespace, peer.OwnerName, peerLabels),
+					newPromotedPolicy(
+						t,
+						expectedEgressProposal.Name,
+						securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
+						newMissingRuleTemplate(),
+					),
+				}
 			},
+			assertViolations: func(t *testing.T, records []violationbuf.ViolationRecord) {
+				t.Helper()
+				require.Len(t, records, 1)
+				require.Equal(t, workload.OwnerName, records[0].SrcName)
+				require.Equal(t, peer.OwnerName, records[0].DstName)
+				require.Equal(t, string(networkingv1.PolicyTypeEgress), records[0].Direction)
+				require.Equal(t, expectedEgressProposal.Name, records[0].DenyingPolicyName)
+			},
+		},
+		{
+			name:      "returns_error_when_multiple_policies_match",
+			direction: networkingv1.PolicyTypeEgress,
+			initialObjects: func(t *testing.T) []client.Object {
+				first := newPromotedPolicy(
+					t,
+					expectedEgressProposal.Name,
+					securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+					expectedEgressProposal.Spec,
+				)
+				first.Name += "-first"
+				second := newPromotedPolicy(
+					t,
+					expectedEgressProposal.Name,
+					securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+					expectedEgressProposal.Spec,
+				)
+				second.Name += "-second"
+				return []client.Object{first, second}
+			},
+			wantErrContains: "multiple policies associated with the same proposal",
+		},
+		{
+			name:      "returns_error_when_workload_selector_cannot_be_resolved",
+			direction: networkingv1.PolicyTypeEgress,
+			initialObjects: func(_ *testing.T) []client.Object {
+				return []client.Object{
+					// we miss the workload deployment here
+					newDeployment(peer.Namespace, peer.OwnerName, peerLabels),
+				}
+			},
+			wantErrContains: "resolving workload selector",
 		},
 	}
 
@@ -146,14 +280,35 @@ func TestTopologyScannerReconcileProposal(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			scanner := newTestTopologyScanner(t, tt.setup()...)
-			require.NoError(t, scanner.reconcileProposal(
-				t.Context(),
-				workload,
-				networkingv1.PolicyTypeEgress,
-				sets.New(peer),
-			))
-			tt.assert(t, scanner)
+			scanner := newTestTopologyScanner(t, tt.initialObjects(t)...)
+			err := scanner.reconcileConnection(t.Context(), workload, tt.direction, sets.New(peer))
+
+			if tt.wantErrContains != "" {
+				require.Error(t, err)
+				require.ErrorContains(t, err, tt.wantErrContains)
+				return
+			}
+			require.NoError(t, err)
+
+			var proposal securityv1alpha1.WorkloadNetworkPolicyProposal
+			if tt.wantProposal != nil {
+				require.NoError(t, scanner.client.Get(t.Context(), tt.wantProposal.NamespacedName(), &proposal))
+				require.Equal(t, tt.wantProposal.Spec, proposal.Spec)
+			} else {
+				err = scanner.client.Get(t.Context(), client.ObjectKey{
+					Namespace: workload.Namespace,
+					Name:      getProposalName(workload, tt.direction),
+				}, &proposal)
+				require.Error(t, err)
+				require.True(t, apierrors.IsNotFound(err))
+			}
+
+			records := scanner.monitorViolationBuffer.Drain()
+			if tt.assertViolations != nil {
+				tt.assertViolations(t, records)
+			} else {
+				require.Empty(t, records)
+			}
 		})
 	}
 }

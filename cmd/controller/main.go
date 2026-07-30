@@ -45,6 +45,7 @@ import (
 	"github.com/rancher-sandbox/network-enforcer/internal/grpcexporter"
 	"github.com/rancher-sandbox/network-enforcer/internal/receiver"
 	"github.com/rancher-sandbox/network-enforcer/internal/topology"
+	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -189,7 +190,17 @@ func run(logger *slog.Logger, conf *config) error {
 		return fmt.Errorf("unable to add OTLP receiver to manager: %w", err)
 	}
 
-	scanner := controller.NewTopologyScanner(mgr.GetClient(), store, logger, conf.drainFlowsInterval)
+	// Create the violation ring buffer shared
+	monitorViolationBuffer := violationbuf.NewBuffer()
+
+	scanner := controller.NewTopologyScanner(
+		mgr.GetClient(),
+		store,
+		logger,
+		conf.drainFlowsInterval,
+		monitorViolationBuffer,
+		eventLogger,
+	)
 	err = mgr.Add(scanner)
 	if err != nil {
 		return fmt.Errorf("unable to add topology scanner to manager: %w", err)
@@ -211,6 +222,7 @@ func run(logger *slog.Logger, conf *config) error {
 
 	conf.wnpStatusSyncConfig.AgentPoolConf.Logger = logger.With("component", "agent-pool")
 	conf.wnpStatusSyncConfig.EventLogger = eventLogger
+	conf.wnpStatusSyncConfig.MonitorViolationBuffer = monitorViolationBuffer
 	logger.InfoContext(ctx, "Setting up WorkloadNetworkPolicyStatusSync with",
 		"config", conf.wnpStatusSyncConfig)
 	var wnpStatusSync *controller.WorkloadNetworkPolicyStatusSync

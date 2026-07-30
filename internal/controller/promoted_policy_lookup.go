@@ -14,6 +14,19 @@ func hasPromotedPolicy(
 	namespace string,
 	proposalName string,
 ) (bool, error) {
+	policies, err := checkExistingPolicy(ctx, c, namespace, proposalName)
+	if err != nil {
+		return false, err
+	}
+	return len(policies) > 0, nil
+}
+
+func checkExistingPolicy(
+	ctx context.Context,
+	c client.Client,
+	namespace string,
+	proposalName string,
+) ([]securityv1alpha1.WorkloadNetworkPolicy, error) {
 	var policies securityv1alpha1.WorkloadNetworkPolicyList
 	matchingLabels := client.MatchingLabels{
 		securityv1alpha1.PolicyPromotedFromLabelKey: proposalName,
@@ -24,8 +37,8 @@ func hasPromotedPolicy(
 		client.InNamespace(namespace),
 		matchingLabels,
 	); err != nil {
-		return false, err
+		return nil, err
 	}
 
-	return len(policies.Items) > 0, nil
+	return policies.Items, nil
 }

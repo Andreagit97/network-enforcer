@@ -121,8 +121,16 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 
 	npKey := types.NamespacedName{Namespace: "ns1", Name: "policy-1"}
 	wnpKey := types.NamespacedName{Namespace: "ns1", Name: "policy-1"}
-	ownedIndex := map[types.NamespacedName]types.NamespacedName{
-		npKey: wnpKey,
+	ownedIndex := map[types.NamespacedName]*types.NamespacedName{
+		npKey: &wnpKey,
+	}
+	wnpByKey := map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy{
+		wnpKey: {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      wnpKey.Name,
+				Namespace: wnpKey.Namespace,
+			},
+		},
 	}
 
 	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -130,14 +138,12 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 	tests := []struct {
 		name       string
 		sync       *WorkloadNetworkPolicyStatusSync
-		ownedIndex map[types.NamespacedName]types.NamespacedName
 		violations []*agentv1.ViolationRecord
 		check      func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord)
 	}{
 		{
-			name:       "attributes_egress_deny_to_WNP",
-			sync:       &WorkloadNetworkPolicyStatusSync{},
-			ownedIndex: ownedIndex,
+			name: "attributes_egress_deny_to_WNP",
+			sync: &WorkloadNetworkPolicyStatusSync{},
 			violations: []*agentv1.ViolationRecord{
 				newProtoViolation(ts, "node-1", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
 					"ns1", "policy-1"),
@@ -153,9 +159,8 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			},
 		},
 		{
-			name:       "attributes_ingress_deny_to_WNP",
-			sync:       &WorkloadNetworkPolicyStatusSync{},
-			ownedIndex: ownedIndex,
+			name: "attributes_ingress_deny_to_WNP",
+			sync: &WorkloadNetworkPolicyStatusSync{},
 			violations: []*agentv1.ViolationRecord{
 				newProtoViolation(ts, "node-1", "ingress", "src-ns", "src-app", "dst-ns", "dst-svc",
 					"ns1", "policy-1"),
@@ -181,7 +186,6 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 					logger: ctrl.Log.WithName("test"),
 				}
 			}(),
-			ownedIndex: ownedIndex,
 			violations: []*agentv1.ViolationRecord{
 				newProtoViolation(ts, "node-1", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
 					"ns-other", "raw-policy"),
@@ -196,7 +200,6 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 				Client: fake.NewClientBuilder().WithScheme(newTestScheme()).Build(),
 				logger: ctrl.Log.WithName("test"),
 			},
-			ownedIndex: ownedIndex,
 			violations: []*agentv1.ViolationRecord{
 				newProtoViolation(ts, "node-1", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
 					"ns-missing", "deleted-policy"),
@@ -206,9 +209,8 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			},
 		},
 		{
-			name:       "drops_deny_with_empty_denying_policy",
-			sync:       &WorkloadNetworkPolicyStatusSync{logger: ctrl.Log.WithName("test")},
-			ownedIndex: ownedIndex,
+			name: "drops_deny_with_empty_denying_policy",
+			sync: &WorkloadNetworkPolicyStatusSync{logger: ctrl.Log.WithName("test")},
 			violations: []*agentv1.ViolationRecord{
 				newProtoViolation(ts, "node-1", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
 					"", ""),
@@ -218,9 +220,8 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			},
 		},
 		{
-			name:       "dedup_by_violation_key",
-			sync:       &WorkloadNetworkPolicyStatusSync{},
-			ownedIndex: ownedIndex,
+			name: "dedup_by_violation_key",
+			sync: &WorkloadNetworkPolicyStatusSync{},
 			violations: []*agentv1.ViolationRecord{
 				newProtoViolation(ts, "node-1", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
 					"ns1", "policy-1"),
@@ -239,7 +240,7 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := tt.sync.correlateViolationsToWNPs(context.Background(), tt.violations, tt.ownedIndex)
+			result := tt.sync.correlateViolationsToWNPs(tt.violations, ownedIndex, wnpByKey)
 			tt.check(t, result)
 		})
 	}
@@ -388,13 +389,14 @@ func TestBuildOwnershipIndex(t *testing.T) {
 
 	// Owned policies should be in the index.
 	require.Equal(t, types.NamespacedName{Namespace: "ns1", Name: "policy-1"},
-		index[types.NamespacedName{Namespace: "ns1", Name: "policy-1"}])
+		*index[types.NamespacedName{Namespace: "ns1", Name: "policy-1"}])
 	require.Equal(t, types.NamespacedName{Namespace: "ns2", Name: "policy-2"},
-		index[types.NamespacedName{Namespace: "ns2", Name: "policy-2"}])
+		*index[types.NamespacedName{Namespace: "ns2", Name: "policy-2"}])
 
-	// Unowned policy should not be in the index.
-	_, exists := index[types.NamespacedName{Namespace: "ns1", Name: "raw-policy"}]
-	require.False(t, exists)
+	// Unowned policy should be in the index but the owner should be nil
+	owner, exists := index[types.NamespacedName{Namespace: "ns1", Name: "raw-policy"}]
+	require.True(t, exists)
+	require.Nil(t, owner)
 }
 
 func TestConvertProtoViolation(t *testing.T) {
@@ -574,24 +576,16 @@ func TestSyncLoopIntegration(t *testing.T) {
 		},
 	}
 
-	sync := &WorkloadNetworkPolicyStatusSync{
-		Client:          fakeClient,
-		agentClientPool: pool,
-		updateInterval:  time.Hour,
-		logger:          ctrl.Log.WithName("test"),
-	}
-
-	err := sync.sync(context.Background())
-	require.NoError(t, err)
+	sync := newTestWorkloadNetworkStatusSync(fakeClient).withPool(pool)
+	require.NoError(t, sync.sync(t.Context()))
 
 	// Verify the WNP status was updated.
 	var updatedWNP securityv1alpha1.WorkloadNetworkPolicy
-	err = fakeClient.Get(
+	require.NoError(t, fakeClient.Get(
 		context.Background(),
 		types.NamespacedName{Namespace: "default", Name: "my-policy"},
 		&updatedWNP,
-	)
-	require.NoError(t, err)
+	))
 	require.Equal(t, int64(1), updatedWNP.Status.ViolationCount)
 	require.Equal(t, int64(1), updatedWNP.Status.ActiveViolationCount)
 	require.Len(t, updatedWNP.Status.Violations, 1)
@@ -668,23 +662,16 @@ func TestSyncClearsViolationsWithNoNewScrapedViolations(t *testing.T) {
 	// Pool with no reachable nodes → empty scrape → zero violations.
 	pool := &fakePool{nodeClients: map[string]grpcexporter.AgentClientAPI{}}
 
-	sync := &WorkloadNetworkPolicyStatusSync{
-		Client:          fakeClient,
-		agentClientPool: pool,
-		updateInterval:  time.Hour,
-		logger:          ctrl.Log.WithName("test"),
-	}
+	sync := newTestWorkloadNetworkStatusSync(fakeClient).withPool(pool)
 
-	err := sync.sync(context.Background())
-	require.NoError(t, err)
+	require.NoError(t, sync.sync(t.Context()))
 
 	var updatedWNP securityv1alpha1.WorkloadNetworkPolicy
-	err = fakeClient.Get(
+	require.NoError(t, fakeClient.Get(
 		context.Background(),
 		types.NamespacedName{Namespace: "ns1", Name: "policy-1"},
 		&updatedWNP,
-	)
-	require.NoError(t, err)
+	))
 
 	// The violation should have been cleared because it matches a rule in
 	// the current policy template (clearAllowedViolations ran even though
@@ -718,12 +705,7 @@ func TestTwoPhasePatchConflict(t *testing.T) {
 		WithObjects(wnp, ownedNP).
 		Build()
 
-	sync := &WorkloadNetworkPolicyStatusSync{
-		Client:          fakeClient,
-		agentClientPool: &fakePool{},
-		updateInterval:  time.Hour,
-		logger:          ctrl.Log.WithName("test"),
-	}
+	sync := newTestWorkloadNetworkStatusSync(fakeClient)
 
 	violations := []securityv1alpha1.ViolationRecord{
 		{
@@ -744,17 +726,15 @@ func TestTwoPhasePatchConflict(t *testing.T) {
 		},
 	}
 
-	err := sync.processWorkloadNetworkPolicy(context.Background(), wnp, violations)
-	require.NoError(t, err)
+	require.NoError(t, sync.processWorkloadNetworkPolicy(t.Context(), wnp, violations))
 
 	// The existing annotation should still be present.
 	var updatedWNP securityv1alpha1.WorkloadNetworkPolicy
-	err = fakeClient.Get(
+	require.NoError(t, fakeClient.Get(
 		context.Background(),
 		types.NamespacedName{Namespace: "ns1", Name: "conflict-policy"},
 		&updatedWNP,
-	)
-	require.NoError(t, err)
+	))
 	require.Equal(t, "original-value", updatedWNP.Annotations["existing.io/key"])
 	// Status should also be updated.
 	require.Equal(t, int64(1), updatedWNP.Status.ActiveViolationCount)

@@ -12,6 +12,7 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 
 	"github.com/jdrews/go-tailer/fswatcher"
 	"github.com/jdrews/go-tailer/glob"
@@ -100,16 +101,16 @@ func (w *Watcher) ProcessPolicyDenyEvent(event *types.PolicyDenyEvent) error {
 }
 
 func (w *Watcher) recordToBuffer(event *types.PolicyDenyEvent) {
-	direction := "egress"
+	direction := ""
 	denyingPolicyNamespace := ""
 	denyingPolicyName := ""
 
 	if len(event.EgressEnforcedBy) > 0 {
-		direction = "egress"
+		direction = string(networkingv1.PolicyTypeEgress)
 		denyingPolicyNamespace = event.EgressEnforcedBy[0].Namespace
 		denyingPolicyName = event.EgressEnforcedBy[0].Name
 	} else if len(event.IngressEnforcedBy) > 0 {
-		direction = "ingress"
+		direction = string(networkingv1.PolicyTypeIngress)
 		denyingPolicyNamespace = event.IngressEnforcedBy[0].Namespace
 		denyingPolicyName = event.IngressEnforcedBy[0].Name
 	}
