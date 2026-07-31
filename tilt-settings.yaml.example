@@ -7,6 +7,6 @@ controller:
 cniwatcher:
   image: cniwatcher
   tag: latest
-  cniType: calico  # aws-vpc, calico, cilium, or flannel
+  cniType: cilium  # aws-vpc, calico, cilium, or flannel
   # goldmaneEndpoint: "goldmane.calico-system.svc:7443"     # for calico
   # hubbleEndpoint: "unix:///var/run/cilium/hubble.sock"    # for cilium
