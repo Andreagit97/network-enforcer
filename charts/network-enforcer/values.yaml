@@ -137,7 +137,6 @@ telemetry:
     otelCollectorClientCertificateSecret: ""
 
 cniwatcher:
-  enabled: true
   # Valid values: aws-vpc, calico, cilium, flannel
   cniType: calico
   # Port for the gRPC ScrapeViolations server. The controller scrapes violations

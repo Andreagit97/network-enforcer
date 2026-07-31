@@ -3,19 +3,13 @@
 ## Kind + tilt
 
 ```bash
-kind create cluster --config=./test/e2e/clusters/no-cni.yaml
-# the CNI used by tilt is the one you set in the `tilt-settings.yaml`
-tilt up
+# E2E_CNI could be `calico` or `cilium`
+# setup-dev-cluster will internally call `tilt up`
+make setup-dev-cluster E2E_CNI=calico
 ```
 
-Deploy a test workload
+Teardown
 
 ```bash
-kubectl apply -f ./hack/demo/workloads.yaml
-```
-
-See the Network Policies Proposals generated
-
-```bash
-kubectl get npp -n demo
+make delete-dev-cluster
 ```
