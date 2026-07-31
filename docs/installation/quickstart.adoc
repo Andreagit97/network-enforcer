@@ -25,7 +25,7 @@ Before deployment, you need to prepare the following:
 As an example, use the following commands to install a kind cluster with Calico CNI:
 
 ```bash
-kind create cluster --config=https://raw.githubusercontent.com/rancher-sandbox/network-enforcer/main/docs/yaml/kind_cluster.yaml
+curl -sSL https://raw.githubusercontent.com/rancher-sandbox/network-enforcer/main/docs/yaml/kind_cluster.yaml | kind create cluster --config=-
 # Create the namespace before deployment.
 # This is required because we create a Secret there to access the Calico Goldmane service.
 kubectl create namespace network-enforcer
