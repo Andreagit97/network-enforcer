@@ -285,7 +285,7 @@ setup-dev-cluster:
 	@echo "🛠️ Setting up dev cluster with '$(E2E_CNI)' CNI..."
 	make test-e2e E2E_INSTALL_CLUSTER_ONLY=kind
 	@echo "🛠️ Calling tilt with '$(E2E_CNI)' CNI..."
-	tilt up -- --cni=$(E2E_CNI)
+# 	tilt up -- --cni=$(E2E_CNI)
 
 .PHONY: delete-dev-cluster
 delete-dev-cluster:

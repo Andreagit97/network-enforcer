@@ -35,6 +35,12 @@ helm_set_values = [
     "cniwatcher.cniType=" + cni_type,
 	"cniwatcher.containerSecurityContext.runAsUser=null",
     "cniwatcher.podSecurityContext.runAsNonRoot=false",
+	"cniwatcher.tolerations[0].key=node-role.kubernetes.io/control-plane",
+	"cniwatcher.tolerations[0].operator=Exists",
+	"cniwatcher.tolerations[0].effect=NoSchedule",
+	"obi.tolerations[0].key=node-role.kubernetes.io/control-plane",
+	"obi.tolerations[0].operator=Exists",
+	"obi.tolerations[0].effect=NoSchedule",
 ]
 
 # For development, handle CNI setup in Kind cluster
@@ -117,7 +123,7 @@ local_resource(
 entrypoint = ["/cniwatcher"]
 dockerfile = "./hack/Dockerfile.cniwatcher.tilt"
 
-docker_build_with_restart(
+docker_build(
 	cniwatcher_image + ":" + cniwatcher_tag,
 	".",
 	dockerfile=dockerfile,

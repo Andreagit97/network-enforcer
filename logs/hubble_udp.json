@@ -1,0 +1,347 @@
+{
+	"flow": {
+		"time": "2026-07-30T14:58:50.896561709Z",
+		"uuid": "161cc494-cc52-496e-9327-21eb7faba0c1",
+		"emitter": {
+			"name": "Hubble",
+			"version": "1.19.4+g95e477fd"
+		},
+		"verdict": "FORWARDED",
+		"ethernet": {
+			"source": "a2:19:fe:95:13:3b",
+			"destination": "02:9f:25:b4:96:c7"
+		},
+		"IP": {
+			"source": "10.0.1.138",
+			"destination": "10.0.0.123",
+			"ipVersion": "IPv4"
+		},
+		"l4": {
+			"UDP": {
+				"source_port": 55503,
+				"destination_port": 53
+			}
+		},
+		"source": {
+			"ID": 2923,
+			"identity": 6806,
+			"cluster_name": "default",
+			"namespace": "default",
+			"labels": [
+				"k8s:app=http-client",
+				"k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=default",
+				"k8s:io.cilium.k8s.policy.cluster=default",
+				"k8s:io.cilium.k8s.policy.serviceaccount=default",
+				"k8s:io.kubernetes.pod.namespace=default"
+			],
+			"pod_name": "http-client-66dcd49f58-cjgtg",
+			"workloads": [
+				{
+					"name": "http-client",
+					"kind": "Deployment"
+				}
+			]
+		},
+		"destination": {
+			"identity": 24995,
+			"cluster_name": "default",
+			"namespace": "kube-system",
+			"labels": [
+				"k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=kube-system",
+				"k8s:io.cilium.k8s.policy.cluster=default",
+				"k8s:io.cilium.k8s.policy.serviceaccount=coredns",
+				"k8s:io.kubernetes.pod.namespace=kube-system",
+				"k8s:k8s-app=kube-dns"
+			],
+			"pod_name": "coredns-7d764666f9-hjbxq"
+		},
+		"Type": "L3_L4",
+		"node_name": "kind-worker",
+		"node_labels": [
+			"beta.kubernetes.io/arch=amd64",
+			"beta.kubernetes.io/os=linux",
+			"kubernetes.io/arch=amd64",
+			"kubernetes.io/hostname=kind-worker",
+			"kubernetes.io/os=linux"
+		],
+		"event_type": {
+			"type": 4,
+			"sub_type": 4
+		},
+		"traffic_direction": "EGRESS",
+		"trace_observation_point": "TO_OVERLAY",
+		"trace_reason": "NEW",
+		"is_reply": false,
+		"interface": {
+			"index": 6,
+			"name": "cilium_vxlan"
+		},
+		"Summary": "UDP"
+	},
+	"node_name": "kind-worker",
+	"time": "2026-07-30T14:58:50.896561709Z"
+}
+{
+	"flow": {
+		"time": "2026-07-30T14:58:50.896966179Z",
+		"uuid": "85e8c345-0273-4446-a893-5d1fb18554a6",
+		"emitter": {
+			"name": "Hubble",
+			"version": "1.19.4+g95e477fd"
+		},
+		"verdict": "FORWARDED",
+		"ethernet": {
+			"source": "02:9f:25:b4:96:c7",
+			"destination": "a2:19:fe:95:13:3b"
+		},
+		"IP": {
+			"source": "10.0.0.123",
+			"source_xlated": "10.96.0.10",
+			"destination": "10.0.1.138",
+			"ipVersion": "IPv4"
+		},
+		"l4": {
+			"UDP": {
+				"source_port": 53,
+				"destination_port": 55503
+			}
+		},
+		"source": {
+			"identity": 24995,
+			"cluster_name": "default",
+			"namespace": "kube-system",
+			"labels": [
+				"k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=kube-system",
+				"k8s:io.cilium.k8s.policy.cluster=default",
+				"k8s:io.cilium.k8s.policy.serviceaccount=coredns",
+				"k8s:io.kubernetes.pod.namespace=kube-system",
+				"k8s:k8s-app=kube-dns"
+			],
+			"pod_name": "coredns-7d764666f9-hjbxq"
+		},
+		"destination": {
+			"ID": 2923,
+			"identity": 6806,
+			"cluster_name": "default",
+			"namespace": "default",
+			"labels": [
+				"k8s:app=http-client",
+				"k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=default",
+				"k8s:io.cilium.k8s.policy.cluster=default",
+				"k8s:io.cilium.k8s.policy.serviceaccount=default",
+				"k8s:io.kubernetes.pod.namespace=default"
+			],
+			"pod_name": "http-client-66dcd49f58-cjgtg",
+			"workloads": [
+				{
+					"name": "http-client",
+					"kind": "Deployment"
+				}
+			]
+		},
+		"Type": "L3_L4",
+		"node_name": "kind-worker",
+		"node_labels": [
+			"beta.kubernetes.io/arch=amd64",
+			"beta.kubernetes.io/os=linux",
+			"kubernetes.io/arch=amd64",
+			"kubernetes.io/hostname=kind-worker",
+			"kubernetes.io/os=linux"
+		],
+		"reply": true,
+		"event_type": {
+			"type": 4
+		},
+		"traffic_direction": "EGRESS",
+		"trace_observation_point": "TO_ENDPOINT",
+		"trace_reason": "REPLY",
+		"is_reply": true,
+		"interface": {
+			"index": 24,
+			"name": "lxc52c87b1c11c3"
+		},
+		"Summary": "UDP"
+	},
+	"node_name": "kind-worker",
+	"time": "2026-07-30T14:58:50.896966179Z"
+}
+{
+	"flow": {
+		"time": "2026-07-30T14:58:50.897081198Z",
+		"uuid": "d9c44ec6-dab3-4c69-8f6b-7c99b2bc042c",
+		"emitter": {
+			"name": "Hubble",
+			"version": "1.19.4+g95e477fd"
+		},
+		"verdict": "FORWARDED",
+		"ethernet": {
+			"source": "8e:07:14:b7:71:7a",
+			"destination": "d2:da:1d:5f:69:ed"
+		},
+		"IP": {
+			"source": "10.0.1.138",
+			"destination": "10.0.1.83",
+			"ipVersion": "IPv4"
+		},
+		"l4": {
+			"UDP": {
+				"source_port": 34533,
+				"destination_port": 18081
+			}
+		},
+		"source": {
+			"ID": 2923,
+			"identity": 6806,
+			"cluster_name": "default",
+			"namespace": "default",
+			"labels": [
+				"k8s:app=http-client",
+				"k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=default",
+				"k8s:io.cilium.k8s.policy.cluster=default",
+				"k8s:io.cilium.k8s.policy.serviceaccount=default",
+				"k8s:io.kubernetes.pod.namespace=default"
+			],
+			"pod_name": "http-client-66dcd49f58-cjgtg",
+			"workloads": [
+				{
+					"name": "http-client",
+					"kind": "Deployment"
+				}
+			]
+		},
+		"destination": {
+			"ID": 809,
+			"identity": 9995,
+			"cluster_name": "default",
+			"namespace": "default",
+			"labels": [
+				"k8s:app=http-server",
+				"k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=default",
+				"k8s:io.cilium.k8s.policy.cluster=default",
+				"k8s:io.cilium.k8s.policy.serviceaccount=default",
+				"k8s:io.kubernetes.pod.namespace=default"
+			],
+			"pod_name": "http-server-5658b848f-bmdwg",
+			"workloads": [
+				{
+					"name": "http-server",
+					"kind": "Deployment"
+				}
+			]
+		},
+		"Type": "L3_L4",
+		"node_name": "kind-worker",
+		"node_labels": [
+			"beta.kubernetes.io/arch=amd64",
+			"beta.kubernetes.io/os=linux",
+			"kubernetes.io/arch=amd64",
+			"kubernetes.io/hostname=kind-worker",
+			"kubernetes.io/os=linux"
+		],
+		"event_type": {
+			"type": 4
+		},
+		"traffic_direction": "EGRESS",
+		"trace_observation_point": "TO_ENDPOINT",
+		"trace_reason": "NEW",
+		"is_reply": false,
+		"interface": {
+			"index": 22,
+			"name": "lxc1badbf030334"
+		},
+		"Summary": "UDP"
+	},
+	"node_name": "kind-worker",
+	"time": "2026-07-30T14:58:50.897081198Z"
+}
+{
+	"flow": {
+		"time": "2026-07-30T14:58:50.898008123Z",
+		"uuid": "c496447a-de28-49ff-81e2-07d49baf70a7",
+		"emitter": {
+			"name": "Hubble",
+			"version": "1.19.4+g95e477fd"
+		},
+		"verdict": "FORWARDED",
+		"ethernet": {
+			"source": "02:9f:25:b4:96:c7",
+			"destination": "a2:19:fe:95:13:3b"
+		},
+		"IP": {
+			"source": "10.0.1.83",
+			"source_xlated": "10.96.12.190",
+			"destination": "10.0.1.138",
+			"ipVersion": "IPv4"
+		},
+		"l4": {
+			"UDP": {
+				"source_port": 18083,
+				"destination_port": 34533
+			}
+		},
+		"source": {
+			"ID": 809,
+			"identity": 9995,
+			"cluster_name": "default",
+			"namespace": "default",
+			"labels": [
+				"k8s:app=http-server",
+				"k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=default",
+				"k8s:io.cilium.k8s.policy.cluster=default",
+				"k8s:io.cilium.k8s.policy.serviceaccount=default",
+				"k8s:io.kubernetes.pod.namespace=default"
+			],
+			"pod_name": "http-server-5658b848f-bmdwg",
+			"workloads": [
+				{
+					"name": "http-server",
+					"kind": "Deployment"
+				}
+			]
+		},
+		"destination": {
+			"ID": 2923,
+			"identity": 6806,
+			"cluster_name": "default",
+			"namespace": "default",
+			"labels": [
+				"k8s:app=http-client",
+				"k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=default",
+				"k8s:io.cilium.k8s.policy.cluster=default",
+				"k8s:io.cilium.k8s.policy.serviceaccount=default",
+				"k8s:io.kubernetes.pod.namespace=default"
+			],
+			"pod_name": "http-client-66dcd49f58-cjgtg",
+			"workloads": [
+				{
+					"name": "http-client",
+					"kind": "Deployment"
+				}
+			]
+		},
+		"Type": "L3_L4",
+		"node_name": "kind-worker",
+		"node_labels": [
+			"beta.kubernetes.io/arch=amd64",
+			"beta.kubernetes.io/os=linux",
+			"kubernetes.io/arch=amd64",
+			"kubernetes.io/hostname=kind-worker",
+			"kubernetes.io/os=linux"
+		],
+		"reply": true,
+		"event_type": {
+			"type": 4
+		},
+		"traffic_direction": "EGRESS",
+		"trace_observation_point": "TO_ENDPOINT",
+		"trace_reason": "REPLY",
+		"is_reply": true,
+		"interface": {
+			"index": 24,
+			"name": "lxc52c87b1c11c3"
+		},
+		"Summary": "UDP"
+	},
+	"node_name": "kind-worker",
+	"time": "2026-07-30T14:58:50.898008123Z"
+}

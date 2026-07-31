@@ -1,0 +1,10 @@
+time=2026-07-30T16:20:30.002Z level=INFO msg="HTTP traffic detected" src=http-client-66dcd49f58-* dest=http-server-5658b848f-* dest_port=18080 proto=tcp reporter=Src
+time=2026-07-30T16:20:30.002Z level=INFO msg="HTTP traffic detected" src=http-client-66dcd49f58-* dest=coredns-7d764666f9-* dest_port=53 proto=udp reporter=Dst
+time=2026-07-30T16:20:30.002Z level=INFO msg="HTTP traffic detected" src=http-client-66dcd49f58-* dest=http-server-5658b848f-* dest_port=18080 proto=tcp reporter=Dst
+time=2026-07-30T16:20:30.002Z level=INFO msg="HTTP traffic detected" src=http-client-66dcd49f58-* dest=coredns-7d764666f9-* dest_port=53 proto=udp reporter=Src
+
+time=2026-07-30T16:20:45.007Z level=INFO msg="HTTP traffic detected" src=http-client-66dcd49f58-* dest=coredns-7d764666f9-* dest_port=53 proto=udp reporter=Src
+time=2026-07-30T16:20:45.007Z level=INFO msg="HTTP traffic detected" src=http-client-66dcd49f58-* dest=coredns-7d764666f9-* dest_port=53 proto=udp reporter=Dst
+
+time=2026-07-30T16:21:00.000Z level=INFO msg="HTTP traffic detected" src=http-client-66dcd49f58-* dest=coredns-7d764666f9-* dest_port=53 proto=udp reporter=Dst
+time=2026-07-30T16:21:00.000Z level=INFO msg="HTTP traffic detected" src=http-client-66dcd49f58-* dest=coredns-7d764666f9-* dest_port=53 proto=udp reporter=Src

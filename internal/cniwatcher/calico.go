@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	pb "github.com/rancher-sandbox/network-enforcer/internal/cniwatcher/calico/goldmane"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
@@ -102,13 +103,13 @@ func (w *CalicoWatcher) ConnectToGoldmane() error {
 }
 
 func (w *CalicoWatcher) WatchFlows() error {
-	filter := &pb.Filter{
-		Actions: []pb.Action{pb.Action_Deny},
-	}
+	// filter := &pb.Filter{
+	// 	Actions: []pb.Action{pb.Action_Deny},
+	// }
 
 	req := &pb.FlowStreamRequest{
-		StartTimeGte:        0,
-		Filter:              filter,
+		StartTimeGte: 0,
+		// Filter:              filter,
 		AggregationInterval: calicoAggregationInterval, // 15 seconds is the required value
 	}
 
@@ -164,6 +165,17 @@ func (w *CalicoWatcher) parsePolicyDenyEvent(flowResult *pb.FlowResult) (*types.
 	key := flow.GetKey()
 	if key == nil {
 		return nil, errors.New("key is nil")
+	}
+
+	if strings.HasPrefix(key.GetSourceName(), "http-client") ||
+		strings.HasPrefix(key.GetDestName(), "http-client") {
+		w.Log.Info("HTTP traffic detected",
+			"src", key.GetSourceName(),
+			"dest", key.GetDestName(),
+			"dest_port", key.GetDestPort(),
+			"proto", key.GetProto(),
+			"reporter", key.GetReporter(),
+		)
 	}
 
 	if key.GetAction() != pb.Action_Deny {

@@ -39,6 +39,7 @@ func installCilium(ctx context.Context, cfg *envconf.Config) (context.Context, e
 		helm.WithArgs("--set", "hubble.enabled=true"),
 		// with this option cilium sends ICMP packets for egress denied traffic
 		helm.WithArgs("--set", "policyDenyResponse=icmp"),
+		helm.WithArgs("--set", "hubble.relay.enabled=true"),
 
 		helm.WithWait(),
 		helm.WithTimeout(defaultHelmTimeout.String()),
