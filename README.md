@@ -12,6 +12,13 @@ The project is built around two core components: a Kubernetes controller that ma
 
 The goal is to reduce manual NetworkPolicy authoring effort while improving visibility, consistency, and confidence in workload-to-workload communication boundaries.
 
+## Documentation
+
+### Getting Started
+
+- [Quick Start](docs/installation/quickstart.adoc)
+- [Uninstall](docs/installation/uninstall.adoc)
+
 ## License
 
 Copyright 2026.
