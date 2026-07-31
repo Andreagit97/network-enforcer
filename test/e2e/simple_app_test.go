@@ -180,14 +180,12 @@ func assessPolicyProposalsGenerated(ctx context.Context, t *testing.T, _ *envcon
 		}
 
 		clientEgressProposal, found := proposalsByName[expectedClientEgressProposal.Name]
-		assert.True(c, found, "expected client egress policy proposal was not generated")
-		if found {
+		if assert.True(c, found, "expected client egress policy proposal was not generated") {
 			assertEqualNetworkPolicyProposal(c, expectedClientEgressProposal, clientEgressProposal)
 		}
 
 		serverIngressProposal, found := proposalsByName[expectedServerIngressProposal.Name]
-		assert.True(c, found, "expected server ingress policy proposal was not generated")
-		if found {
+		if assert.True(c, found, "expected server ingress policy proposal was not generated") {
 			assertEqualNetworkPolicyProposal(c, expectedServerIngressProposal, serverIngressProposal)
 		}
 	}, defaultOperationTimeout, 3*time.Second, "expected policy proposals were not generated")
