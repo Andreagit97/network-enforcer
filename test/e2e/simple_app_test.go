@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
@@ -166,36 +167,32 @@ func assessPolicyProposalsGenerated(ctx context.Context, t *testing.T, _ *envcon
 	}
 
 	var proposals securityv1alpha1.WorkloadNetworkPolicyProposalList
-	require.Eventually(t, func() bool {
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		err := getSecurityV1Alpha1Client(ctx).WithNamespace(namespace).List(ctx, &proposals)
-		require.NoError(t, err, "failed to list network policy proposals")
-
-		foundClientEgress := false
-		foundServerIngress := false
-		for _, proposal := range proposals.Items {
-			switch proposal.Name {
-			case expectedClientEgressProposal.Name:
-				foundClientEgress = true
-			case expectedServerIngressProposal.Name:
-				foundServerIngress = true
-			default:
-				continue
-			}
+		assert.NoError(c, err, "failed to list network policy proposals")
+		if err != nil {
+			return
 		}
-		return foundClientEgress && foundServerIngress
+
+		proposalsByName := make(map[string]securityv1alpha1.WorkloadNetworkPolicyProposal, len(proposals.Items))
+		for _, proposal := range proposals.Items {
+			proposalsByName[proposal.Name] = proposal
+		}
+
+		clientEgressProposal, found := proposalsByName[expectedClientEgressProposal.Name]
+		assert.True(c, found, "expected client egress policy proposal was not generated")
+		if found {
+			assertEqualNetworkPolicyProposal(c, expectedClientEgressProposal, clientEgressProposal)
+		}
+
+		serverIngressProposal, found := proposalsByName[expectedServerIngressProposal.Name]
+		assert.True(c, found, "expected server ingress policy proposal was not generated")
+		if found {
+			assertEqualNetworkPolicyProposal(c, expectedServerIngressProposal, serverIngressProposal)
+		}
 	}, defaultOperationTimeout, 3*time.Second, "expected policy proposals were not generated")
 
 	require.Len(t, proposals.Items, 2, "expected exactly 2 policy proposals to be generated")
-	for _, proposal := range proposals.Items {
-		switch proposal.Name {
-		case expectedClientEgressProposal.Name:
-			requireEqualNetworkPolicyProposal(t, expectedClientEgressProposal,
-				proposal)
-		case expectedServerIngressProposal.Name:
-			requireEqualNetworkPolicyProposal(t, expectedServerIngressProposal,
-				proposal)
-		}
-	}
 	// We return the proposals so that other tests can use them
 	return context.WithValue(ctx, key("proposals"), proposals.Items)
 }
