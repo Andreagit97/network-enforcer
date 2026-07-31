@@ -145,14 +145,23 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			name: "attributes_egress_deny_to_WNP",
 			sync: &WorkloadNetworkPolicyStatusSync{},
 			violations: []*agentv1.ViolationRecord{
-				newProtoViolation(ts, "node-1", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
-					"ns1", "policy-1"),
+				newProtoViolation(
+					ts,
+					"node-1",
+					string(networkingv1.PolicyTypeEgress),
+					"src-ns",
+					"src-app",
+					"dst-ns",
+					"dst-svc",
+					"ns1",
+					"policy-1",
+				),
 			},
 			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
 				require.Len(t, result, 1)
 				require.Contains(t, result, wnpKey)
 				require.Len(t, result[wnpKey], 1)
-				require.Equal(t, "egress", result[wnpKey][0].Direction)
+				require.Equal(t, networkingv1.PolicyTypeEgress, result[wnpKey][0].Direction)
 				require.Equal(t, "node-1", result[wnpKey][0].NodeName)
 				require.Equal(t, "ns1", result[wnpKey][0].DenyingPolicyNamespace)
 				require.Equal(t, "policy-1", result[wnpKey][0].DenyingPolicyName)
@@ -162,14 +171,23 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			name: "attributes_ingress_deny_to_WNP",
 			sync: &WorkloadNetworkPolicyStatusSync{},
 			violations: []*agentv1.ViolationRecord{
-				newProtoViolation(ts, "node-1", "ingress", "src-ns", "src-app", "dst-ns", "dst-svc",
-					"ns1", "policy-1"),
+				newProtoViolation(
+					ts,
+					"node-1",
+					string(networkingv1.PolicyTypeIngress),
+					"src-ns",
+					"src-app",
+					"dst-ns",
+					"dst-svc",
+					"ns1",
+					"policy-1",
+				),
 			},
 			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
 				require.Len(t, result, 1)
 				require.Contains(t, result, wnpKey)
 				require.Len(t, result[wnpKey], 1)
-				require.Equal(t, "ingress", result[wnpKey][0].Direction)
+				require.Equal(t, networkingv1.PolicyTypeIngress, result[wnpKey][0].Direction)
 			},
 		},
 		{
@@ -187,8 +205,17 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 				}
 			}(),
 			violations: []*agentv1.ViolationRecord{
-				newProtoViolation(ts, "node-1", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
-					"ns-other", "raw-policy"),
+				newProtoViolation(
+					ts,
+					"node-1",
+					string(networkingv1.PolicyTypeEgress),
+					"src-ns",
+					"src-app",
+					"dst-ns",
+					"dst-svc",
+					"ns-other",
+					"raw-policy",
+				),
 			},
 			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
 				require.Empty(t, result)
@@ -201,8 +228,17 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 				logger: ctrl.Log.WithName("test"),
 			},
 			violations: []*agentv1.ViolationRecord{
-				newProtoViolation(ts, "node-1", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
-					"ns-missing", "deleted-policy"),
+				newProtoViolation(
+					ts,
+					"node-1",
+					string(networkingv1.PolicyTypeEgress),
+					"src-ns",
+					"src-app",
+					"dst-ns",
+					"dst-svc",
+					"ns-missing",
+					"deleted-policy",
+				),
 			},
 			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
 				require.Empty(t, result)
@@ -212,8 +248,17 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			name: "drops_deny_with_empty_denying_policy",
 			sync: &WorkloadNetworkPolicyStatusSync{logger: ctrl.Log.WithName("test")},
 			violations: []*agentv1.ViolationRecord{
-				newProtoViolation(ts, "node-1", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
-					"", ""),
+				newProtoViolation(
+					ts,
+					"node-1",
+					string(networkingv1.PolicyTypeEgress),
+					"src-ns",
+					"src-app",
+					"dst-ns",
+					"dst-svc",
+					"",
+					"",
+				),
 			},
 			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
 				require.Empty(t, result)
@@ -223,10 +268,28 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			name: "dedup_by_violation_key",
 			sync: &WorkloadNetworkPolicyStatusSync{},
 			violations: []*agentv1.ViolationRecord{
-				newProtoViolation(ts, "node-1", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
-					"ns1", "policy-1"),
-				newProtoViolation(ts, "node-2", "egress", "src-ns", "src-app", "dst-ns", "dst-svc",
-					"ns1", "policy-1"),
+				newProtoViolation(
+					ts,
+					"node-1",
+					string(networkingv1.PolicyTypeEgress),
+					"src-ns",
+					"src-app",
+					"dst-ns",
+					"dst-svc",
+					"ns1",
+					"policy-1",
+				),
+				newProtoViolation(
+					ts,
+					"node-2",
+					string(networkingv1.PolicyTypeEgress),
+					"src-ns",
+					"src-app",
+					"dst-ns",
+					"dst-svc",
+					"ns1",
+					"policy-1",
+				),
 			},
 			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
 				require.Len(t, result, 1)
@@ -261,8 +324,17 @@ func TestScrapeAllNodes(t *testing.T) {
 			clients: map[string]grpcexporter.AgentClientAPI{
 				"node-1": &fakeAgentClient{
 					violations: []*agentv1.ViolationRecord{
-						newProtoViolation(ts, "node-1", "egress", "ns1", "app1", "ns2", "svc1",
-							"ns1", "policy-1"),
+						newProtoViolation(
+							ts,
+							"node-1",
+							string(networkingv1.PolicyTypeEgress),
+							"ns1",
+							"app1",
+							"ns2",
+							"svc1",
+							"ns1",
+							"policy-1",
+						),
 					},
 				},
 				"node-2": &fakeAgentClient{shouldFail: true},
@@ -327,7 +399,7 @@ func TestProcessWorkloadNetworkPolicy_TwoPhasePatch(t *testing.T) {
 		{
 			Timestamp: metav1.NewTime(now.Add(-10 * time.Minute)),
 			NodeName:  "node-1",
-			Direction: "egress",
+			Direction: networkingv1.PolicyTypeEgress,
 			Source: securityv1alpha1.WorkloadRef{
 				Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
 			},
@@ -403,13 +475,13 @@ func TestConvertProtoViolation(t *testing.T) {
 	t.Parallel()
 
 	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	pbViolation := newProtoViolation(ts, "node-1", "egress",
+	pbViolation := newProtoViolation(ts, "node-1", string(networkingv1.PolicyTypeEgress),
 		"src-ns", "src-app", "dst-ns", "dst-svc",
 		"policy-ns", "policy-name")
 
 	rec := convertProtoViolation(pbViolation)
 
-	require.Equal(t, "egress", rec.Direction)
+	require.Equal(t, networkingv1.PolicyTypeEgress, rec.Direction)
 	require.Equal(t, "node-1", rec.NodeName)
 	require.Equal(t, "src-ns", rec.Source.Namespace)
 	require.Equal(t, "Deployment", rec.Source.OwnerKind)
@@ -568,7 +640,7 @@ func TestSyncLoopIntegration(t *testing.T) {
 		nodeClients: map[string]grpcexporter.AgentClientAPI{
 			"node-1": &fakeAgentClient{
 				violations: []*agentv1.ViolationRecord{
-					newProtoViolation(now, "node-1", "egress",
+					newProtoViolation(now, "node-1", string(networkingv1.PolicyTypeEgress),
 						"src-ns", "src-app", "dst-ns", "dst-svc",
 						"default", "my-policy"),
 				},
@@ -589,7 +661,7 @@ func TestSyncLoopIntegration(t *testing.T) {
 	require.Equal(t, int64(1), updatedWNP.Status.ViolationCount)
 	require.Equal(t, int64(1), updatedWNP.Status.ActiveViolationCount)
 	require.Len(t, updatedWNP.Status.Violations, 1)
-	require.Equal(t, "egress", updatedWNP.Status.Violations[0].Direction)
+	require.Equal(t, networkingv1.PolicyTypeEgress, updatedWNP.Status.Violations[0].Direction)
 	require.Equal(t, "src-app", updatedWNP.Status.Violations[0].Source.OwnerName)
 }
 
@@ -633,7 +705,7 @@ func TestSyncClearsViolationsWithNoNewScrapedViolations(t *testing.T) {
 				ID:        0,
 				Timestamp: metav1.NewTime(now.Add(-10 * time.Minute)),
 				NodeName:  "node-1",
-				Direction: "egress",
+				Direction: networkingv1.PolicyTypeEgress,
 				Source: securityv1alpha1.WorkloadRef{
 					Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
 				},
@@ -711,7 +783,7 @@ func TestTwoPhasePatchConflict(t *testing.T) {
 		{
 			Timestamp: metav1.NewTime(time.Now()),
 			NodeName:  "node-1",
-			Direction: "egress",
+			Direction: networkingv1.PolicyTypeEgress,
 			Source: securityv1alpha1.WorkloadRef{
 				Namespace: "ns1", OwnerKind: "Deployment", OwnerName: "app",
 			},

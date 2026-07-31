@@ -105,7 +105,7 @@ func convertMonitorViolations(
 			&agentv1.ViolationRecord{
 				Timestamp:              timestamppb.New(v.Timestamp),
 				NodeName:               v.NodeName,
-				Direction:              v.Direction,
+				Direction:              string(v.Direction),
 				SourceNamespace:        v.SrcNamespace,
 				SourceName:             v.SrcName,
 				SourceWorkloads:        v.SrcWorkloads,
@@ -325,7 +325,7 @@ func convertProtoViolation(v *agentv1.ViolationRecord) securityv1alpha1.Violatio
 	return securityv1alpha1.ViolationRecord{
 		Timestamp:              metav1.NewTime(v.GetTimestamp().AsTime()),
 		NodeName:               v.GetNodeName(),
-		Direction:              v.GetDirection(),
+		Direction:              networkingv1.PolicyType(v.GetDirection()),
 		Source:                 source,
 		Dest:                   dest,
 		Protocol:               corev1.Protocol(v.GetProtocol()),
@@ -411,7 +411,7 @@ func (r *WorkloadNetworkPolicyStatusSync) emitAcknowledgedViolationOtelLog(
 		otellog.Int64("id", violation.ID),
 		otellog.String("timestamp", violation.Timestamp.UTC().Format(time.RFC3339)),
 		otellog.String("reason", ack.Reason),
-		otellog.String("direction", violation.Direction),
+		otellog.String("direction", string(violation.Direction)),
 		otellog.String("source.namespace", violation.Source.Namespace),
 		otellog.String("source.workload.kind", violation.Source.OwnerKind),
 		otellog.String("source.workload.name", violation.Source.OwnerName),

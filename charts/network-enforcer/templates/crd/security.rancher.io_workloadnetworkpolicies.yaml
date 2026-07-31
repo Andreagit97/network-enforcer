@@ -603,8 +603,7 @@ spec:
                               type: string
                           type: object
                         direction:
-                          description: 'Direction is the traffic direction: "egress"
-                            or "ingress".'
+                          description: Direction is the traffic direction.
                           type: string
                         dstPort:
                           description: DstPort is the destination port. 0 when unavailable.
@@ -732,8 +731,7 @@ spec:
                           type: string
                       type: object
                     direction:
-                      description: 'Direction is the traffic direction: "egress" or
-                        "ingress".'
+                      description: Direction is the traffic direction.
                       type: string
                     dstPort:
                       description: DstPort is the destination port. 0 when unavailable.

@@ -18,7 +18,7 @@ message ViolationRecord {
   google.protobuf.Timestamp timestamp = 1;
   // Node whose cniwatcher reported the violation.
   string node_name = 2;
-  // Direction of the flow: "egress" or "ingress".
+  // Direction of the flow: "Egress" or "Ingress"
   string direction = 3;
 
   // Source endpoint.

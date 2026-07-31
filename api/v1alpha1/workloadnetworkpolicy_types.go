@@ -86,8 +86,8 @@ type ViolationRecord struct {
 	Timestamp metav1.Time `json:"timestamp"`
 	// NodeName is the node whose cniwatcher reported the violation.
 	NodeName string `json:"nodeName"`
-	// Direction is the traffic direction: "egress" or "ingress".
-	Direction string `json:"direction"`
+	// Direction is the traffic direction.
+	Direction networkingv1.PolicyType `json:"direction"`
 	// Source is the workload that initiated the traffic.
 	// +optional
 	Source WorkloadRef `json:"source,omitempty"`

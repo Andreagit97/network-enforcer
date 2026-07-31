@@ -8,13 +8,14 @@ import (
 	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 )
 
 func TestBufferRecordAndDrain(t *testing.T) {
 	buf := violationbuf.NewBuffer()
 
 	buf.Record(violationbuf.ViolationRecord{
-		Direction:              "egress",
+		Direction:              networkingv1.PolicyTypeEgress,
 		SrcNamespace:           "ns1",
 		SrcName:                "pod1",
 		DstNamespace:           "ns2",
@@ -28,7 +29,7 @@ func TestBufferRecordAndDrain(t *testing.T) {
 
 	records := buf.Drain()
 	require.Len(t, records, 1)
-	require.Equal(t, "egress", records[0].Direction)
+	require.Equal(t, networkingv1.PolicyTypeEgress, records[0].Direction)
 	require.Equal(t, "deny-all", records[0].DenyingPolicyName)
 	require.Equal(t, int32(80), records[0].DstPort)
 
@@ -45,7 +46,7 @@ func TestBufferOverwritesOldest(t *testing.T) {
 		dropped := buf.Record(violationbuf.ViolationRecord{
 			SrcName:   fmt.Sprintf("pod-%d", i),
 			Action:    "protect",
-			Direction: "egress",
+			Direction: networkingv1.PolicyTypeEgress,
 			DstPort:   int32(i),
 		})
 		require.False(t, dropped, "should not drop while filling buffer")
@@ -55,7 +56,7 @@ func TestBufferOverwritesOldest(t *testing.T) {
 	dropped := buf.Record(violationbuf.ViolationRecord{
 		SrcName:   "pod-overflow",
 		Action:    "protect",
-		Direction: "egress",
+		Direction: networkingv1.PolicyTypeEgress,
 		DstPort:   9999,
 	})
 	require.True(t, dropped, "should report a drop when buffer overflows")
@@ -78,7 +79,7 @@ func TestBufferDrainReverseChronologicalOrder(t *testing.T) {
 			Timestamp: baseTime.Add(time.Duration(i) * time.Second),
 			SrcName:   fmt.Sprintf("pod-%d", i),
 			Action:    "protect",
-			Direction: "egress",
+			Direction: networkingv1.PolicyTypeEgress,
 		})
 	}
 
@@ -98,7 +99,7 @@ func TestBufferDrainAfterOverflow(t *testing.T) {
 		buf.Record(violationbuf.ViolationRecord{
 			SrcName:   fmt.Sprintf("pod-%d", i),
 			Action:    "protect",
-			Direction: "egress",
+			Direction: networkingv1.PolicyTypeEgress,
 		})
 	}
 
@@ -132,7 +133,7 @@ func TestConcurrentRecordAndDrain(_ *testing.T) {
 			buf.Record(violationbuf.ViolationRecord{
 				SrcName:   fmt.Sprintf("pod-%d", i),
 				Action:    "protect",
-				Direction: "egress",
+				Direction: networkingv1.PolicyTypeEgress,
 			})
 		}
 		close(done)

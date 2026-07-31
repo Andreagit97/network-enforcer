@@ -36,7 +36,7 @@ func TestGRPCServer_ScrapeViolations_WithRecords(t *testing.T) {
 	buf.Record(violationbuf.ViolationRecord{
 		Timestamp:              now.Add(-time.Second),
 		NodeName:               "node1",
-		Direction:              "egress",
+		Direction:              networkingv1.PolicyTypeEgress,
 		SrcNamespace:           "ns1",
 		SrcName:                "pod1",
 		SrcLabels:              []string{"app=foo"},
@@ -52,7 +52,7 @@ func TestGRPCServer_ScrapeViolations_WithRecords(t *testing.T) {
 	buf.Record(violationbuf.ViolationRecord{
 		Timestamp:              now,
 		NodeName:               "node1",
-		Direction:              "ingress",
+		Direction:              networkingv1.PolicyTypeIngress,
 		SrcNamespace:           "ns3",
 		SrcName:                "pod2",
 		DstNamespace:           "ns1",
@@ -72,13 +72,13 @@ func TestGRPCServer_ScrapeViolations_WithRecords(t *testing.T) {
 	require.Len(t, v, 2)
 
 	// Drain returns newest first (by insertion order), so ingress (recorded second) comes first.
-	require.Equal(t, "ingress", v[0].GetDirection())
+	require.Equal(t, string(networkingv1.PolicyTypeIngress), v[0].GetDirection())
 	require.Equal(t, "pod2", v[0].GetSourceName())
 	require.Equal(t, "pod1", v[0].GetDestName())
 	require.Equal(t, int32(53), v[0].GetDstPort())
 	require.Equal(t, "block-dns", v[0].GetDenyingPolicyName())
 
-	require.Equal(t, "egress", v[1].GetDirection())
+	require.Equal(t, string(networkingv1.PolicyTypeEgress), v[1].GetDirection())
 	require.Equal(t, "pod1", v[1].GetSourceName())
 	require.Equal(t, "svc1", v[1].GetDestName())
 	require.Equal(t, int32(80), v[1].GetDstPort())
@@ -161,7 +161,7 @@ func TestProcessPolicyDenyEvent_RecordsToBuffer(t *testing.T) {
 	// ...but buffer should have the record.
 	records := buf.Drain()
 	require.Len(t, records, 1)
-	require.Equal(t, string(networkingv1.PolicyTypeEgress), records[0].Direction)
+	require.Equal(t, networkingv1.PolicyTypeEgress, records[0].Direction)
 	require.Equal(t, "pod1", records[0].SrcName)
 	require.Equal(t, "svc1", records[0].DstName)
 	require.Equal(t, corev1.ProtocolTCP, records[0].Protocol)

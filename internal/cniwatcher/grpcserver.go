@@ -66,7 +66,7 @@ func (s *GRPCServer) ScrapeViolations(
 		out.Violations = append(out.Violations, &agentv1.ViolationRecord{
 			Timestamp:              timestamppb.New(rec.Timestamp),
 			NodeName:               rec.NodeName,
-			Direction:              rec.Direction,
+			Direction:              string(rec.Direction),
 			SourceNamespace:        rec.SrcNamespace,
 			SourceName:             rec.SrcName,
 			SourceWorkloads:        rec.SrcWorkloads,

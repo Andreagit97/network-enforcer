@@ -9,13 +9,14 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 )
 
 // ViolationRecord is a network-flavoured violation record ready for scraping.
 type ViolationRecord struct {
 	Timestamp time.Time
 	NodeName  string
-	Direction string // "Egress" or "Ingress"
+	Direction networkingv1.PolicyType
 
 	SrcNamespace string
 	SrcName      string
