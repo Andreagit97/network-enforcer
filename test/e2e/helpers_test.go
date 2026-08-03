@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -100,34 +101,34 @@ func teardownTestNamespace(ctx context.Context, t *testing.T, _ *envconf.Config)
 	return ctx
 }
 
-func requireEqualNetworkPolicyProposal(
-	t *testing.T,
+func assertEqualNetworkPolicyProposal(
+	t assert.TestingT,
 	expected, actual securityv1alpha1.WorkloadNetworkPolicyProposal,
 ) {
 	// Metadata
-	require.Equal(t, expected.Name, actual.Name, "network policy proposal name does not match expected")
-	require.Equal(t, expected.Namespace, actual.Namespace, "network policy proposal namespace does not match expected")
+	assert.Equal(t, expected.Name, actual.Name, "network policy proposal name does not match expected")
+	assert.Equal(t, expected.Namespace, actual.Namespace, "network policy proposal namespace does not match expected")
 
 	// Spec
-	require.ElementsMatch(
+	assert.ElementsMatch(
 		t,
 		expected.Spec.PolicyTypes,
 		actual.Spec.PolicyTypes,
 		"network policy proposal policy types do not match expected",
 	)
-	require.Equal(
+	assert.Equal(
 		t,
 		expected.Spec.PodSelector,
 		actual.Spec.PodSelector,
 		"network policy proposal pod selector does not match expected",
 	)
-	require.ElementsMatch(
+	assert.ElementsMatch(
 		t,
 		expected.Spec.Ingress,
 		actual.Spec.Ingress,
 		"network policy proposal ingress rules do not match expected",
 	)
-	require.ElementsMatch(
+	assert.ElementsMatch(
 		t,
 		expected.Spec.Egress,
 		actual.Spec.Egress,
