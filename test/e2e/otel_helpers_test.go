@@ -127,8 +127,8 @@ func fetchURL(client *http.Client, url string) (string, error) {
 	return string(body), nil
 }
 
-func assertMetricHasLabel(t *testing.T, body, labelKey, labelValue string) {
-	t.Helper()
+func assertMetricHasLabel(c *assert.CollectT, body, labelKey, labelValue string) {
+	c.Helper()
 
 	expected := fmt.Sprintf(`%s="%s"`, labelKey, labelValue)
 	for line := range strings.SplitSeq(body, "\n") {
@@ -136,13 +136,13 @@ func assertMetricHasLabel(t *testing.T, body, labelKey, labelValue string) {
 			return
 		}
 	}
-	assert.Failf(t, "metric label not found",
+	assert.Failf(c, "metric label not found",
 		"expected metric %q to have label %s=%q\nmetrics:\n%s",
 		defaultPolicyDenyMetricName, labelKey, labelValue, body)
 }
 
-func assertMetricHasLabelKey(t *testing.T, body, labelKey string) {
-	t.Helper()
+func assertMetricHasLabelKey(c *assert.CollectT, body, labelKey string) {
+	c.Helper()
 
 	needle := labelKey + `="`
 	for line := range strings.SplitSeq(body, "\n") {
@@ -150,7 +150,7 @@ func assertMetricHasLabelKey(t *testing.T, body, labelKey string) {
 			return
 		}
 	}
-	assert.Failf(t, "metric label key not found",
+	assert.Failf(c, "metric label key not found",
 		"expected metric %q to have label key %q\nmetrics:\n%s",
 		defaultPolicyDenyMetricName, labelKey, body)
 }
@@ -217,30 +217,31 @@ func checkPolicyDenyOTLPLog(ctx context.Context, t *testing.T, config *envconf.C
 	require.NoError(t, err, "should port-forward to collector prometheus port")
 	defer close(stopCh)
 
-	promURL := fmt.Sprintf("http://localhost:%d/metrics", localPort)
+	// using localhost we could end up on an ipv6 address, so we use 127.0.0.1
+	promURL := fmt.Sprintf("http://127.0.0.1:%d/metrics", localPort)
 	client := &http.Client{Timeout: 10 * time.Second}
 
 	var metricsBody string
-	require.Eventually(t, func() bool {
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		body, fetchErr := fetchURL(client, promURL)
-		if fetchErr != nil {
+		if !assert.NoError(c, fetchErr, "fetching metrics from %s", promURL) {
 			t.Logf("failed to fetch metrics: %v", fetchErr)
-			return false
+			return
 		}
 		metricsBody = body
-		return strings.Contains(body, defaultPolicyDenyMetricName)
+
+		// Today we send all violations through OTEL even if they are not caused by our policies, so we need to check we find our
+		assertMetricHasLabel(c, metricsBody, "cni_type", string(suiteCfg.cni))
+		assertMetricHasLabel(c, metricsBody, "network_protocol", string(corev1.ProtocolUDP))
+		assertMetricHasLabel(c, metricsBody, "source_namespace", namespace)
+		assertMetricHasLabel(c, metricsBody, "destination_namespace", namespace)
+		assertMetricHasLabelKey(c, metricsBody, "source_name")
+		assertMetricHasLabelKey(c, metricsBody, "destination_name")
+		assertMetricHasLabelKey(c, metricsBody, "node_name")
+		assertMetricHasLabel(c, metricsBody, "destination_port",
+			strconv.FormatInt(int64(simpleAppUDPServerPort), 10))
 	}, defaultOperationTimeout, 2*time.Second,
 		"%s metric should appear on the collector Prometheus endpoint", defaultPolicyDenyMetricName)
-
-	assertMetricHasLabel(t, metricsBody, "cni_type", string(suiteCfg.cni))
-	assertMetricHasLabel(t, metricsBody, "network_protocol", string(corev1.ProtocolUDP))
-	assertMetricHasLabel(t, metricsBody, "source_namespace", namespace)
-	assertMetricHasLabel(t, metricsBody, "destination_namespace", namespace)
-	assertMetricHasLabelKey(t, metricsBody, "source_name")
-	assertMetricHasLabelKey(t, metricsBody, "destination_name")
-	assertMetricHasLabelKey(t, metricsBody, "node_name")
-	assertMetricHasLabel(t, metricsBody, "destination_port",
-		strconv.FormatInt(int64(simpleAppUDPServerPort), 10))
 
 	// Calico reports the denying policy.
 	if suiteCfg.cni == calico {
