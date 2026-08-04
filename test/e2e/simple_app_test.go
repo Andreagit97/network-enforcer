@@ -205,7 +205,7 @@ func assessPolicyProposalsPromoted(ctx context.Context, t *testing.T, _ *envconf
 	policies := make([]securityv1alpha1.WorkloadNetworkPolicy, 0, len(proposals))
 	for _, proposal := range proposals {
 		// We promote the proposal to a network policy.
-		proposal.SetPromotionLabel()
+		proposal.SetPromotionLabel(securityv1alpha1.WorkloadNetworkPolicyModeMonitor)
 		require.NoError(t, client.Update(ctx, &proposal),
 			"failed to promote network policy proposal %q", proposal.NamespacedName().String())
 
