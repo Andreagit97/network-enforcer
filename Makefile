@@ -270,13 +270,22 @@ generate-calico-goldmane-proto: download-calico-goldmane-proto ## Generate Go co
 # Use `E2E_CNI` env variable to change CNI
 # Example: `make test-e2e E2E_CNI=cilium`
 # If E2E_CNI is not specified the default is `cilium`
+#
+# Set E2E_USE_EXISTING_CLUSTER=true to reuse an existing cluster.
+# Set E2E_DEPENDENCIES=none to skip CNI and cert-manager installation (useful with existing clusters).
+# Example: `make test-e2e E2E_USE_EXISTING_CLUSTER=true E2E_DEPENDENCIES=cert-manager`
 .PHONY: test-e2e
-test-e2e: build-controller-image build-cniwatcher-image
+test-e2e:
+ifneq ($(E2E_USE_EXISTING_CLUSTER),true)
+ifeq ($(E2E_NO_REBUILD),)
+	$(MAKE) build-controller-image build-cniwatcher-image
+endif
+endif
 	@echo "🧪 Building chart dependencies..."
 	helm repo add --force-update open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
 	helm dependency build charts/network-enforcer
 	@echo "🧪 Running e2e tests with '$(E2E_CNI)' CNI..."
-	go test -v ./test/e2e/... -count=1
+	E2E_USE_EXISTING_CLUSTER=$(E2E_USE_EXISTING_CLUSTER) E2E_DEPENDENCIES=$(E2E_DEPENDENCIES) go test -v ./test/e2e/... -count=1
 
 # Create kind cluster and install selected CNI with dependencies.
 # Example: `make setup-dev-cluster E2E_CNI=cilium`

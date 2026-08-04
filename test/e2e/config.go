@@ -33,6 +33,11 @@ const (
 	cniVersionEnvVar = "E2E_CNI_VERSION"
 	// the value of this envVar is the name of the cluster to create.
 	installClusterOnlyEnvVar = "E2E_INSTALL_CLUSTER_ONLY"
+	// set to "true" to skip cluster creation, image loading, and cluster destroy.
+	useExistingClusterEnvVar = "E2E_USE_EXISTING_CLUSTER"
+	// comma-separated list of optional dependencies to install: "cni", "cert-manager".
+	// Empty/unset means all. "none" means none.
+	e2eDependenciesEnvVar = "E2E_DEPENDENCIES"
 )
 
 type suiteConfig struct {
@@ -76,4 +81,27 @@ func readEnvOrDefault(name, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+func useExistingCluster() bool {
+	return readEnvOrDefault(useExistingClusterEnvVar, "") == "true"
+}
+
+// hasE2EDependency returns true if name is an active e2e dependency.
+// An empty E2E_DEPENDENCIES value means all dependencies are active.
+// The special value "none" disables all.
+func hasE2EDependency(name string) bool {
+	raw := strings.TrimSpace(os.Getenv(e2eDependenciesEnvVar))
+	if raw == "" {
+		return true
+	}
+	if strings.EqualFold(raw, "none") {
+		return false
+	}
+	for tok := range strings.SplitSeq(raw, ",") {
+		if strings.EqualFold(strings.TrimSpace(tok), name) {
+			return true
+		}
+	}
+	return false
 }
