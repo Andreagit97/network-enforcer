@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -33,6 +34,11 @@ const (
 	cniVersionEnvVar = "E2E_CNI_VERSION"
 	// the value of this envVar is the name of the cluster to create.
 	installClusterOnlyEnvVar = "E2E_INSTALL_CLUSTER_ONLY"
+	// set to "true" to skip cluster creation, image loading, and cluster destroy.
+	useExistingClusterEnvVar = "E2E_USE_EXISTING_CLUSTER"
+	// comma-separated list of optional dependencies to install: "cni", "cert-manager".
+	// Empty/unset means all. "none" means none.
+	e2eDependenciesEnvVar = "E2E_DEPENDENCIES"
 )
 
 type suiteConfig struct {
@@ -49,9 +55,13 @@ type suiteConfig struct {
 	drainFlowsInterval      time.Duration
 	wnpStatusUpdateInterval time.Duration
 	installClusterOnly      string
+	useExistingCluster      bool
+	hasNoDependencies       bool
+	dependencies            []string
 }
 
 func loadSuiteConfig() suiteConfig {
+	dependencies := os.Getenv(e2eDependenciesEnvVar)
 	return suiteConfig{
 		logsDir:         defaultLogsDir,
 		chartPath:       defaultChartPath,
@@ -67,6 +77,14 @@ func loadSuiteConfig() suiteConfig {
 		drainFlowsInterval:      defaultDrainFlowsInterval,
 		wnpStatusUpdateInterval: defaultWnpStatusUpdateInterval,
 		installClusterOnly:      readEnvOrDefault(installClusterOnlyEnvVar, ""),
+		useExistingCluster:      readEnvOrDefault(useExistingClusterEnvVar, "") != "",
+		hasNoDependencies:       dependencies == "none",
+		dependencies: func() []string {
+			if d := strings.TrimSpace(dependencies); d != "" {
+				return strings.Split(d, ",")
+			}
+			return nil
+		}(),
 	}
 }
 
@@ -76,4 +94,18 @@ func readEnvOrDefault(name, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+// hasE2EDependency returns true if name is an active e2e dependency.
+// An empty E2E_DEPENDENCIES value means all dependencies are active.
+// The special value "none" disables all.
+func (c *suiteConfig) HasE2EDependency(name string) bool {
+	if c.hasNoDependencies {
+		return false
+	}
+	if len(c.dependencies) == 0 {
+		// unset or empty
+		return true
+	}
+	return slices.Contains(c.dependencies, name)
 }

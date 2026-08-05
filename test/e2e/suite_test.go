@@ -55,38 +55,52 @@ func TestMain(m *testing.M) {
 		_ = flag.Set("test.run", "^$")
 	}
 
+	// Base setup — always runs.
+	// we inject the suite config in the context so that each test can access parameters like the release name, namespace, image, etc.
 	setupFuncs := []env.Func{
-		envfuncs.CreateClusterWithConfig(kind.NewProvider(), clusterName, testSuiteConf.kindConfigPath),
-		envfuncs.LoadImageToCluster(clusterName, testSuiteConf.controllerImage),
-		envfuncs.LoadImageToCluster(clusterName, testSuiteConf.cniWatcherImage),
-		// we inject the suite config in the context so that each test can access parameters like the release name, namespace, image, etc.
 		injectSuiteConfig(testSuiteConf),
 		injectSetupLogger(),
 		injectSecurityV1Alpha1Client(),
-		installCNI(),
-		installCertManager(),
 	}
 	finishFuncs := []env.Func{}
 
+	// Cluster creation + image loading — skipped when reusing an existing cluster.
+	if !testSuiteConf.useExistingCluster {
+		setupFuncs = append([]env.Func{
+			envfuncs.CreateClusterWithConfig(kind.NewProvider(), clusterName, testSuiteConf.kindConfigPath),
+			envfuncs.LoadImageToCluster(clusterName, testSuiteConf.controllerImage),
+			envfuncs.LoadImageToCluster(clusterName, testSuiteConf.cniWatcherImage),
+		}, setupFuncs...)
+	}
+
+	// Optional dependencies, controlled by E2E_DEPENDENCIES.
+	// Default (empty/unset): both are installed. Set "none" to skip all.
+	if testSuiteConf.HasE2EDependency("cni") {
+		setupFuncs = append(setupFuncs, installCNI())
+	}
+	if testSuiteConf.HasE2EDependency("cert-manager") {
+		setupFuncs = append(setupFuncs, installCertManager())
+	}
+
 	if testSuiteConf.installClusterOnly == "" {
 		// We install the network-enforcer and we destroy the cluster only in case we are running tests.
-		setupFuncs = append(setupFuncs,
-			installNetEnforcerChart(),
-		)
-		finishFuncs = append(finishFuncs,
-			envfuncs.ExportClusterLogs(clusterName, testSuiteConf.logsDir),
-			func(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
-				if suiteFailed.Load() {
-					getSetupLogger(ctx).InfoContext(
-						ctx,
-						"⏩ Skipping cluster destroy to debug",
-						"clusterName", clusterName,
-					)
-					return ctx, nil
-				}
-				return envfuncs.DestroyCluster(clusterName)(ctx, cfg)
-			},
-		)
+		setupFuncs = append(setupFuncs, installNetEnforcerChart())
+		if !testSuiteConf.useExistingCluster {
+			finishFuncs = append(finishFuncs,
+				envfuncs.ExportClusterLogs(clusterName, testSuiteConf.logsDir),
+				func(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
+					if suiteFailed.Load() {
+						getSetupLogger(ctx).InfoContext(
+							ctx,
+							"⏩ Skipping cluster destroy to debug",
+							"clusterName", clusterName,
+						)
+						return ctx, nil
+					}
+					return envfuncs.DestroyCluster(clusterName)(ctx, cfg)
+				},
+			)
+		}
 	}
 
 	testEnv.Setup(setupFuncs...)
