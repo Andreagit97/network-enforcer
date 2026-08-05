@@ -69,11 +69,22 @@ spec:
         securityContext: {{- toYaml .Values.controller.containerSecurityContext
           | nindent 10 }}
         volumeMounts:
+        - name: webhook-certs
+          mountPath: /tmp/k8s-webhook-server/serving-certs
+          readOnly: true
         - name: cniwatcher-mtls-certs
           mountPath: {{ include "network-enforcer.cniwatcher.certDir" . }}
           readOnly: true
         {{- include "network-enforcer.otel.config.volumeMounts" . | indent 8 }}
       volumes:
+      - name: webhook-certs
+        csi:
+          driver: "csi.cert-manager.io"
+          readOnly: true
+          volumeAttributes:
+            csi.cert-manager.io/issuer-name: {{ include "network-enforcer.caIssuerName" . }}
+            csi.cert-manager.io/issuer-kind: Issuer
+            csi.cert-manager.io/dns-names: {{ include "network-enforcer.fullname" . }}-controller-webhook.{{ .Release.Namespace }}.svc
       - name: cniwatcher-mtls-certs
         csi:
           driver: "csi.cert-manager.io"

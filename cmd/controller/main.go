@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	otellog "go.opentelemetry.io/otel/log"
@@ -35,9 +36,12 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/controller"
@@ -66,11 +70,22 @@ type otelConf struct {
 	ClientKey  string
 }
 
+type metricsConf struct {
+	Addr     string
+	CertPath string
+	CertName string
+	CertKey  string
+}
+
+type webhookConf struct {
+	CertPath string
+	CertName string
+	CertKey  string
+}
+
 type config struct {
-	metricsAddr          string
-	metricsCertPath      string
-	metricsCertName      string
-	metricsCertKey       string
+	metrics              metricsConf
+	webhook              webhookConf
 	enableLeaderElection bool
 	probeAddr            string
 	secureMetrics        bool
@@ -82,18 +97,12 @@ type config struct {
 	wnpStatusSyncConfig  controller.WorkloadNetworkPolicyStatusSyncConfig
 }
 
-func newControllerManager(conf *config) (manager.Manager, error) {
-	// Mitigate HTTP/2 Stream Cancellation / Rapid Reset CVEs.
-	disableHTTP2 := func(c *tls.Config) {
-		c.NextProtos = []string{"http/1.1"}
-	}
-
-	if !conf.enableHTTP2 {
-		conf.tlsOpts = append(conf.tlsOpts, disableHTTP2)
-	}
-
+func newControllerManager(
+	webhookServer webhook.Server,
+	conf *config,
+) (manager.Manager, error) {
 	metricsServerOptions := metricsserver.Options{
-		BindAddress:   conf.metricsAddr,
+		BindAddress:   conf.metrics.Addr,
 		SecureServing: conf.secureMetrics,
 		TLSOpts:       conf.tlsOpts,
 	}
@@ -102,10 +111,10 @@ func newControllerManager(conf *config) (manager.Manager, error) {
 		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
 	}
 
-	if len(conf.metricsCertPath) > 0 {
-		metricsServerOptions.CertDir = conf.metricsCertPath
-		metricsServerOptions.CertName = conf.metricsCertName
-		metricsServerOptions.KeyName = conf.metricsCertKey
+	if len(conf.metrics.CertPath) > 0 {
+		metricsServerOptions.CertDir = conf.metrics.CertPath
+		metricsServerOptions.CertName = conf.metrics.CertName
+		metricsServerOptions.KeyName = conf.metrics.CertKey
 	}
 
 	scheme := runtime.NewScheme()
@@ -114,6 +123,7 @@ func newControllerManager(conf *config) (manager.Manager, error) {
 	controllerOptions := ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
+		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: conf.probeAddr,
 		LeaderElection:         conf.enableLeaderElection,
 		LeaderElectionID:       "6163c1ee.security.rancher.io",
@@ -123,6 +133,39 @@ func newControllerManager(conf *config) (manager.Manager, error) {
 		return nil, fmt.Errorf("unable to start manager: %w", err)
 	}
 	return mgr, nil
+}
+
+func parseWebhookOptions(logger *slog.Logger, config *config) (*certwatcher.CertWatcher, []func(*tls.Config)) {
+	var webhookCertWatcher *certwatcher.CertWatcher
+
+	// Initial webhook TLS options
+	webhookTLSOpts := config.tlsOpts
+
+	if len(config.webhook.CertPath) > 0 {
+		logger.Info("Initializing webhook certificate watcher using provided certificates",
+			"webhook-cert-path",
+			config.webhook.CertPath,
+			"webhook-cert-name",
+			config.webhook.CertName,
+			"webhook-cert-key",
+			config.webhook.CertKey)
+
+		var err error
+		webhookCertWatcher, err = certwatcher.New(
+			filepath.Join(config.webhook.CertPath, config.webhook.CertName),
+			filepath.Join(config.webhook.CertPath, config.webhook.CertKey),
+		)
+		if err != nil {
+			logger.Error("Failed to initialize webhook certificate watcher", "error", err)
+			os.Exit(1)
+		}
+
+		webhookTLSOpts = append(webhookTLSOpts, func(config *tls.Config) {
+			config.GetCertificate = webhookCertWatcher.GetCertificate
+		})
+	}
+
+	return webhookCertWatcher, webhookTLSOpts
 }
 
 // setupOtelLogExporter initialises the OTLP log exporter and registers
@@ -161,9 +204,28 @@ func setupOtelLogExporter(
 func run(logger *slog.Logger, conf *config) error {
 	ctx := ctrl.SetupSignalHandler()
 
-	mgr, err := newControllerManager(conf)
+	// Mitigate HTTP/2 Stream Cancellation / Rapid Reset CVEs.
+	if !conf.enableHTTP2 {
+		conf.tlsOpts = append(conf.tlsOpts, func(c *tls.Config) {
+			c.NextProtos = []string{"http/1.1"}
+		})
+	}
+
+	webhookCertWatcher, webhookTLSOpts := parseWebhookOptions(logger, conf)
+	webhookServer := webhook.NewServer(webhook.Options{
+		TLSOpts: webhookTLSOpts,
+	})
+
+	mgr, err := newControllerManager(webhookServer, conf)
 	if err != nil {
 		return fmt.Errorf("unable to create controller manager: %w", err)
+	}
+
+	if webhookCertWatcher != nil {
+		logger.InfoContext(ctx, "Adding webhook certificate watcher to manager")
+		if err = mgr.Add(webhookCertWatcher); err != nil {
+			return fmt.Errorf("unable to add webhook certificate watcher to manager: %w", err)
+		}
 	}
 
 	var eventLogger otellog.Logger
@@ -206,37 +268,9 @@ func run(logger *slog.Logger, conf *config) error {
 		return fmt.Errorf("unable to add topology scanner to manager: %w", err)
 	}
 
-	if err = (&controller.WorkloadNetworkPolicyReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to setup WorkloadNetworkPolicyReconciler controller: %w", err)
+	if err = setupControllers(ctx, logger, mgr, conf, eventLogger, monitorViolationBuffer); err != nil {
+		return err
 	}
-
-	if err = (&controller.WorkloadNetworkPolicyProposalReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("unable to setup WorkloadNetworkPolicyProposal controller: %w", err)
-	}
-
-	conf.wnpStatusSyncConfig.AgentPoolConf.Logger = logger.With("component", "agent-pool")
-	conf.wnpStatusSyncConfig.EventLogger = eventLogger
-	conf.wnpStatusSyncConfig.MonitorViolationBuffer = monitorViolationBuffer
-	logger.InfoContext(ctx, "Setting up WorkloadNetworkPolicyStatusSync with",
-		"config", conf.wnpStatusSyncConfig)
-	var wnpStatusSync *controller.WorkloadNetworkPolicyStatusSync
-	if wnpStatusSync, err = controller.NewWorkloadNetworkPolicyStatusSync(
-		mgr.GetClient(),
-		&conf.wnpStatusSyncConfig,
-	); err != nil {
-		return fmt.Errorf("unable to create WorkloadNetworkPolicyStatusSync: %w", err)
-	}
-	if err = mgr.Add(wnpStatusSync); err != nil {
-		return fmt.Errorf("unable to add WorkloadNetworkPolicyStatusSync runnable: %w", err)
-	}
-
-	// +kubebuilder:scaffold:builder
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return fmt.Errorf("unable to add healthz check: %w", err)
@@ -249,9 +283,58 @@ func run(logger *slog.Logger, conf *config) error {
 	return mgr.Start(ctx)
 }
 
+func setupControllers(
+	ctx context.Context,
+	logger *slog.Logger,
+	mgr manager.Manager,
+	conf *config,
+	eventLogger otellog.Logger,
+	monitorViolationBuffer *violationbuf.Buffer,
+) error {
+	if err := (&controller.WorkloadNetworkPolicyReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to setup WorkloadNetworkPolicyReconciler controller: %w", err)
+	}
+
+	if err := (&controller.WorkloadNetworkPolicyProposalReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to setup WorkloadNetworkPolicyProposal controller: %w", err)
+	}
+
+	if err := builder.WebhookManagedBy(mgr, &securityv1alpha1.WorkloadNetworkPolicyProposal{}).
+		WithValidator(&controller.ProposalWebhook{}).
+		Complete(); err != nil {
+		return fmt.Errorf("unable to create WorkloadNetworkPolicyProposal webhook: %w", err)
+	}
+
+	conf.wnpStatusSyncConfig.AgentPoolConf.Logger = logger.With("component", "agent-pool")
+	conf.wnpStatusSyncConfig.EventLogger = eventLogger
+	conf.wnpStatusSyncConfig.MonitorViolationBuffer = monitorViolationBuffer
+	logger.InfoContext(ctx, "Setting up WorkloadNetworkPolicyStatusSync with",
+		"config", conf.wnpStatusSyncConfig)
+	wnpStatusSync, err := controller.NewWorkloadNetworkPolicyStatusSync(
+		mgr.GetClient(),
+		&conf.wnpStatusSyncConfig,
+	)
+	if err != nil {
+		return fmt.Errorf("unable to create WorkloadNetworkPolicyStatusSync: %w", err)
+	}
+	if err = mgr.Add(wnpStatusSync); err != nil {
+		return fmt.Errorf("unable to add WorkloadNetworkPolicyStatusSync runnable: %w", err)
+	}
+
+	// +kubebuilder:scaffold:builder
+
+	return nil
+}
+
 func main() {
 	conf := &config{}
-	flag.StringVar(&conf.metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
+	flag.StringVar(&conf.metrics.Addr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&conf.probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&conf.enableLeaderElection, "leader-elect", false,
@@ -259,17 +342,23 @@ func main() {
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.BoolVar(&conf.secureMetrics, "metrics-secure", true,
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
-	flag.StringVar(&conf.metricsCertPath, "metrics-cert-path", "",
+	flag.StringVar(&conf.metrics.CertPath, "metrics-cert-path", "",
 		"The directory that contains the metrics server certificate.")
 	flag.StringVar(
-		&conf.metricsCertName,
+		&conf.metrics.CertName,
 		"metrics-cert-name",
 		"tls.crt",
 		"The name of the metrics server certificate file.",
 	)
-	flag.StringVar(&conf.metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
+	flag.StringVar(&conf.metrics.CertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
+	flag.StringVar(&conf.webhook.CertPath, "webhook-cert-path", "",
+		"The directory that contains the webhook certificate.")
+	flag.StringVar(&conf.webhook.CertName, "webhook-cert-name", "tls.crt",
+		"The name of the webhook certificate file.")
+	flag.StringVar(&conf.webhook.CertKey, "webhook-cert-key", "tls.key",
+		"The name of the webhook key file.")
 	flag.BoolVar(&conf.enableHTTP2, "enable-http2", false,
-		"If set, HTTP/2 will be enabled for the metrics server")
+		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.IntVar(&conf.otlpPort, "otlp-port", 4317, "The port the OTLP gRPC receiver listens on.")
 	flag.StringVar(&conf.otel.Endpoint, "otlp-log-endpoint",
 		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
