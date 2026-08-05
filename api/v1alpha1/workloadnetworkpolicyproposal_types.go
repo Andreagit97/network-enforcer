@@ -68,19 +68,32 @@ func (wnpp *WorkloadNetworkPolicyProposal) NamespacedName() types.NamespacedName
 	}
 }
 
-func (wnpp *WorkloadNetworkPolicyProposal) SetPromotionLabel() {
+func (wnpp *WorkloadNetworkPolicyProposal) SetPromotionLabel(mode WorkloadNetworkPolicyMode) {
 	if wnpp == nil {
 		return
 	}
 	if wnpp.Labels == nil {
 		wnpp.SetLabels(map[string]string{})
 	}
-	wnpp.Labels[ProposalPromoteLabelKey] = "true"
+	wnpp.Labels[ProposalPromoteLabelKey] = string(mode)
 }
 
-func (wnpp *WorkloadNetworkPolicyProposal) HasPromotionLabel() bool {
+// HasPromotionLabel reports whether the proposal has a valid promotion label and
+// returns the target WorkloadNetworkPolicy mode when it does.
+func (wnpp *WorkloadNetworkPolicyProposal) HasPromotionLabel() (WorkloadNetworkPolicyMode, bool) {
 	if wnpp == nil {
-		return false
+		return "", false
 	}
-	return wnpp.Labels[ProposalPromoteLabelKey] == "true"
+	val, ok := wnpp.Labels[ProposalPromoteLabelKey]
+	if !ok {
+		return "", false
+	}
+	switch WorkloadNetworkPolicyMode(val) {
+	case WorkloadNetworkPolicyModeMonitor:
+		return WorkloadNetworkPolicyModeMonitor, true
+	case WorkloadNetworkPolicyModeProtect:
+		return WorkloadNetworkPolicyModeProtect, true
+	default:
+		return "", false
+	}
 }

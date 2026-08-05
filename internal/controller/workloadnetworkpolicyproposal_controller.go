@@ -61,7 +61,8 @@ func (r *WorkloadNetworkPolicyProposalReconciler) Reconcile(
 		return ctrl.Result{}, nil
 	}
 
-	if !proposal.HasPromotionLabel() {
+	mode, hasPromotionLabel := proposal.HasPromotionLabel()
+	if !hasPromotionLabel {
 		return ctrl.Result{}, nil
 	}
 
@@ -71,7 +72,7 @@ func (r *WorkloadNetworkPolicyProposalReconciler) Reconcile(
 			Namespace: proposal.Namespace,
 		},
 		Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
-			Mode:           securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
+			Mode:           mode,
 			PolicyTemplate: proposal.Spec,
 		},
 	}

@@ -129,10 +129,10 @@ func TestWorkloadNetworkPolicyProposalReconciler(t *testing.T) {
 			},
 		},
 		{
-			name: "PromotionLabel",
+			name: "PromotionLabelMonitor",
 			setup: func() []client.Object {
 				proposal := baseProposal.DeepCopy()
-				proposal.SetPromotionLabel()
+				proposal.SetPromotionLabel(securityv1alpha1.WorkloadNetworkPolicyModeMonitor)
 				return []client.Object{proposal}
 			},
 			assert: func(t *testing.T, reconciler *WorkloadNetworkPolicyProposalReconciler) {
@@ -142,6 +142,39 @@ func TestWorkloadNetworkPolicyProposalReconciler(t *testing.T) {
 				require.Equal(t, securityv1alpha1.WorkloadNetworkPolicyModeMonitor, p.Spec.Mode)
 				require.True(t, p.HasPromotedLabel(baseProposal.Name))
 				require.Equal(t, baseProposal.Spec, p.Spec.PolicyTemplate)
+			},
+		},
+		{
+			name: "PromotionLabelProtect",
+			setup: func() []client.Object {
+				proposal := baseProposal.DeepCopy()
+				proposal.SetPromotionLabel(securityv1alpha1.WorkloadNetworkPolicyModeProtect)
+				return []client.Object{proposal}
+			},
+			assert: func(t *testing.T, reconciler *WorkloadNetworkPolicyProposalReconciler) {
+				var p securityv1alpha1.WorkloadNetworkPolicy
+				err := reconciler.Get(t.Context(), baseProposal.NamespacedName(), &p)
+				require.NoError(t, err)
+				require.Equal(t, securityv1alpha1.WorkloadNetworkPolicyModeProtect, p.Spec.Mode)
+				require.True(t, p.HasPromotedLabel(baseProposal.Name))
+				require.Equal(t, baseProposal.Spec, p.Spec.PolicyTemplate)
+			},
+		},
+		{
+			name: "InvalidPromotionLabel",
+			setup: func() []client.Object {
+				proposal := baseProposal.DeepCopy()
+				proposal.Labels = map[string]string{
+					securityv1alpha1.ProposalPromoteLabelKey: "invalid",
+				}
+				return []client.Object{proposal}
+			},
+			assert: func(t *testing.T, reconciler *WorkloadNetworkPolicyProposalReconciler) {
+				var p securityv1alpha1.WorkloadNetworkPolicy
+				err := reconciler.Get(t.Context(), baseProposal.NamespacedName(), &p)
+				// Invalid promotion label values are ignored
+				require.Error(t, err)
+				require.True(t, apierrors.IsNotFound(err))
 			},
 		},
 	}

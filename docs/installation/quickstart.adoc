@@ -223,10 +223,11 @@ Some notes:
 == WorkloadNetworkPolicy (monitor mode)
 
 These proposals look reasonable for our application, so the next step is to convert them into definitive policies.
-To do that, label the `WorkloadNetworkPolicyProposal` resources with `security.rancher.io/promote=true`.
+To do that, label the `WorkloadNetworkPolicyProposal` resources with `security.rancher.io/promote=monitor`
+(or `security.rancher.io/promote=protect` to promote directly into protect mode).
 
 ```bash
-kubectl label wnpp deployment-http-client-egress deployment-http-server-ingress security.rancher.io/promote=true
+kubectl label wnpp deployment-http-client-egress deployment-http-server-ingress security.rancher.io/promote=monitor
 ```
 
 After a few seconds, you should see two new `WorkloadNetworkPolicy` resources.
