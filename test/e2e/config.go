@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -54,9 +55,13 @@ type suiteConfig struct {
 	drainFlowsInterval      time.Duration
 	wnpStatusUpdateInterval time.Duration
 	installClusterOnly      string
+	useExistingCluster      bool
+	hasNoDependencies       bool
+	dependencies            []string
 }
 
 func loadSuiteConfig() suiteConfig {
+	dependencies := os.Getenv(e2eDependenciesEnvVar)
 	return suiteConfig{
 		logsDir:         defaultLogsDir,
 		chartPath:       defaultChartPath,
@@ -72,6 +77,14 @@ func loadSuiteConfig() suiteConfig {
 		drainFlowsInterval:      defaultDrainFlowsInterval,
 		wnpStatusUpdateInterval: defaultWnpStatusUpdateInterval,
 		installClusterOnly:      readEnvOrDefault(installClusterOnlyEnvVar, ""),
+		useExistingCluster:      readEnvOrDefault(useExistingClusterEnvVar, "") != "",
+		hasNoDependencies:       dependencies == "none",
+		dependencies: func() []string {
+			if d := strings.TrimSpace(dependencies); d != "" {
+				return strings.Split(d, ",")
+			}
+			return nil
+		}(),
 	}
 }
 
@@ -83,25 +96,16 @@ func readEnvOrDefault(name, defaultValue string) string {
 	return value
 }
 
-func useExistingCluster() bool {
-	return readEnvOrDefault(useExistingClusterEnvVar, "") == "true"
-}
-
 // hasE2EDependency returns true if name is an active e2e dependency.
 // An empty E2E_DEPENDENCIES value means all dependencies are active.
 // The special value "none" disables all.
-func hasE2EDependency(name string) bool {
-	raw := strings.TrimSpace(os.Getenv(e2eDependenciesEnvVar))
-	if raw == "" {
-		return true
-	}
-	if strings.EqualFold(raw, "none") {
+func (c *suiteConfig) HasE2EDependency(name string) bool {
+	if c.hasNoDependencies {
 		return false
 	}
-	for tok := range strings.SplitSeq(raw, ",") {
-		if strings.EqualFold(strings.TrimSpace(tok), name) {
-			return true
-		}
+	if len(c.dependencies) == 0 {
+		// unset or empty
+		return true
 	}
-	return false
+	return slices.Contains(c.dependencies, name)
 }

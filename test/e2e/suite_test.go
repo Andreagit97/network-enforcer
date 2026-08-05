@@ -55,8 +55,6 @@ func TestMain(m *testing.M) {
 		_ = flag.Set("test.run", "^$")
 	}
 
-	existingCluster := useExistingCluster()
-
 	// Base setup — always runs.
 	// we inject the suite config in the context so that each test can access parameters like the release name, namespace, image, etc.
 	setupFuncs := []env.Func{
@@ -67,7 +65,7 @@ func TestMain(m *testing.M) {
 	finishFuncs := []env.Func{}
 
 	// Cluster creation + image loading — skipped when reusing an existing cluster.
-	if !existingCluster {
+	if !testSuiteConf.useExistingCluster {
 		setupFuncs = append([]env.Func{
 			envfuncs.CreateClusterWithConfig(kind.NewProvider(), clusterName, testSuiteConf.kindConfigPath),
 			envfuncs.LoadImageToCluster(clusterName, testSuiteConf.controllerImage),
@@ -77,17 +75,17 @@ func TestMain(m *testing.M) {
 
 	// Optional dependencies, controlled by E2E_DEPENDENCIES.
 	// Default (empty/unset): both are installed. Set "none" to skip all.
-	if hasE2EDependency("cni") {
+	if testSuiteConf.HasE2EDependency("cni") {
 		setupFuncs = append(setupFuncs, installCNI())
 	}
-	if hasE2EDependency("cert-manager") {
+	if testSuiteConf.HasE2EDependency("cert-manager") {
 		setupFuncs = append(setupFuncs, installCertManager())
 	}
 
 	if testSuiteConf.installClusterOnly == "" {
 		// We install the network-enforcer and we destroy the cluster only in case we are running tests.
 		setupFuncs = append(setupFuncs, installNetEnforcerChart())
-		if !existingCluster {
+		if !testSuiteConf.useExistingCluster {
 			finishFuncs = append(finishFuncs,
 				envfuncs.ExportClusterLogs(clusterName, testSuiteConf.logsDir),
 				func(ctx context.Context, cfg *envconf.Config) (context.Context, error) {

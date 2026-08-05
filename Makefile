@@ -274,6 +274,7 @@ generate-calico-goldmane-proto: download-calico-goldmane-proto ## Generate Go co
 # Set E2E_USE_EXISTING_CLUSTER=true to reuse an existing cluster.
 # Set E2E_DEPENDENCIES=none to skip CNI and cert-manager installation (useful with existing clusters).
 # Example: `make test-e2e E2E_USE_EXISTING_CLUSTER=true E2E_DEPENDENCIES=cert-manager`
+# Set E2E_NO_REBUILD=true to skip image building.  This is useful when you're developing new e2e tests.
 .PHONY: test-e2e
 test-e2e:
 ifneq ($(E2E_USE_EXISTING_CLUSTER),true)
