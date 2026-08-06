@@ -1,6 +1,24 @@
-# Istio investigation
+|              |                                                                  |
+| :----------- | :--------------------------------------------------------------- |
+| Feature Name | Istio-first provider model for learn/monitor/protect             |
+| Start Date   | 2026-08-06                                                       |
+| Category     | Architecture                                                     |
+| RFC PR       | <https://github.com/rancher-sandbox/network-enforcer/pull/204>   |
+| State        |                                                                  |
 
-## Setup
+## Summary
+
+This RFC proposes moving `network-enforcer` to an Istio-first architecture for the full `learn` -> `monitor` -> `protect` lifecycle, using ambient mesh and `AuthorizationPolicy` as the primary path.
+
+At the same time, we need a path for clusters where Istio is not the chosen data plane. Calico and Cilium already expose rich gRPC APIs that can support learn/monitor/protect without routing traffic through Istio.
+
+This RFC aligns these two needs: Istio-first by default, native provider options for Calico/Cilium when Istio is not present.
+
+## Investigation basis
+
+The design in this RFC is based on hands-on validation
+
+### Setup
 
 ```bash
 minikube start --driver=kvm2  --nodes 2 --container-runtime=containerd
@@ -103,9 +121,9 @@ EOF
 kubectl label namespace default istio.io/dataplane-mode=ambient
 ```
 
-## Learn mode
+### Learn mode
 
-### Destination outside the mesh
+#### Destination outside the mesh
 
 ```bash
 kubectl exec deployments/http-client -it -- curl http://google.com
@@ -125,7 +143,7 @@ kubectl logs -n istio-system ztunnel-wwjv9 -f
 kubectl logs -n istio-system ztunnel-zhks8 -f
 ```
 
-### Source outside the mesh
+#### Source outside the mesh
 
 Create a deployment outside the mesh (istio-system namespace is outside the mesh)
 
@@ -159,7 +177,7 @@ We see the source name and namespace but not SPIFFE identity since the source is
 2026-08-04T13:47:13.103969Z info access connection complete src.addr=10.244.0.17:34010 src.workload="client" src.namespace="istio-system" dst.addr=10.244.1.15:18080 dst.service="http-service.default.svc.cluster.local" dst.workload="http-server-6cbcc86f5d-bxb9w" dst.namespace="default" direction="inbound" bytes_sent=16 bytes_recv=16 duration="1004ms"
 ```
 
-### Both workloads inside the mesh
+#### Both workloads inside the mesh
 
 ```bash
 kubectl exec deployments/http-client -it -- sh -c 'printf send-tcp-traffic | nc -w 1 http-service 18080'
@@ -179,7 +197,7 @@ On the destination ztunnel, direction is `inbound`.
 
 The above logs are almost identical what changes is the direction of the traffic seen by each ztunnel.
 
-### Both workloads inside the mesh (UDP)
+#### Both workloads inside the mesh (UDP)
 
 ```bash
 kubectl exec deployments/http-client -it -- sh -c 'printf send-udp-traffic | nc -u -w 1 http-service 18081'
@@ -187,9 +205,9 @@ kubectl exec deployments/http-client -it -- sh -c 'printf send-udp-traffic | nc 
 
 No logs are produced because UDP traffic does not go through ztunnels.
 
-## Monitor mode
+### Monitor mode
 
-### Ingress deny
+#### Ingress deny
 
 ```bash
 kubectl apply -f - <<EOF
@@ -231,7 +249,7 @@ On the destination ztunnel we see an additional dry-run log with the policy name
 2026-08-03T15:34:58.752429Z info access connection complete src.addr=10.244.0.5:49084 src.workload="http-client-6b4b85489f-t6sl2" src.namespace="default" src.identity="spiffe://cluster.local/ns/default/sa/http-client-sa" dst.addr=10.244.1.5:15008 dst.hbone_addr=10.244.1.5:18080 dst.service="http-service.default.svc.cluster.local" dst.workload="http-server-6cbcc86f5d-lhq82" dst.namespace="default" dst.identity="spiffe://cluster.local/ns/default/sa/http-server-sa" direction="inbound" bytes_sent=16 bytes_recv=16 duration="1005ms"
 ```
 
-### Ingress allow
+#### Ingress allow
 
 ```bash
 kubectl apply -f - <<EOF
@@ -269,9 +287,9 @@ On the destination ztunnel, we don't see the name of the policy because no polic
 2026-08-03T15:36:18.038132Z info access connection complete src.addr=10.244.0.5:49084 src.workload="http-client-6b4b85489f-t6sl2" src.namespace="default" src.identity="spiffe://cluster.local/ns/default/sa/http-client-sa" dst.addr=10.244.1.5:15008 dst.hbone_addr=10.244.1.5:18080 dst.service="http-service.default.svc.cluster.local" dst.workload="http-server-6cbcc86f5d-lhq82" dst.namespace="default" dst.identity="spiffe://cluster.local/ns/default/sa/http-server-sa" direction="inbound" bytes_sent=16 bytes_recv=16 duration="1004ms"
 ```
 
-## Protect mode
+### Protect mode
 
-### Ingress deny
+#### Ingress deny
 
 ```bash
 kubectl apply -f - <<EOF
@@ -310,7 +328,7 @@ On the destination side we see a rejection error with the policy name.
 2026-08-03T15:39:07.536483Z error access connection complete src.addr=10.244.0.5:49084 src.workload="http-client-6b4b85489f-t6sl2" src.namespace="default" src.identity="spiffe://cluster.local/ns/default/sa/http-client-sa" dst.addr=10.244.1.5:15008 dst.hbone_addr=10.244.1.5:18080 dst.service="http-service.default.svc.cluster.local" dst.workload="http-server-6cbcc86f5d-lhq82" dst.namespace="default" dst.identity="spiffe://cluster.local/ns/default/sa/http-server-sa" direction="inbound" bytes_sent=0 bytes_recv=0 duration="0ms" error="connection closed due to policy rejection: explicitly denied by: default/deny-http-server-protect"
 ```
 
-### Ingress allow
+#### Ingress allow
 
 ```bash
 kubectl apply -f - <<EOF
@@ -349,7 +367,7 @@ On the destination side we see a policy-rejection error, but without a policy na
 2026-08-03T15:40:53.359734Z error access connection complete src.addr=10.244.0.5:49084 src.workload="http-client-6b4b85489f-t6sl2" src.namespace="default" src.identity="spiffe://cluster.local/ns/default/sa/http-client-sa" dst.addr=10.244.1.5:15008 dst.hbone_addr=10.244.1.5:18080 dst.service="http-service.default.svc.cluster.local" dst.workload="http-server-6cbcc86f5d-lhq82" dst.namespace="default" dst.identity="spiffe://cluster.local/ns/default/sa/http-server-sa" direction="inbound" bytes_sent=0 bytes_recv=0 duration="0ms" error="connection closed due to policy rejection: allow policies exist, but none allowed"
 ```
 
-## Ingress gateway
+### Ingress gateway
 
 ```bash
 kubectl get crd gateways.gateway.networking.k8s.io &> /dev/null || \
@@ -377,19 +395,53 @@ So we don't see the connection from external-ip -> gateway. We only see the conn
 2026-08-04T08:11:27.450747Z info access connection complete src.addr=10.244.1.9:47072 src.workload="bookinfo-gateway-istio-6fd954bf4-v2xsx" src.namespace="default" src.identity="spiffe://cluster.local/ns/default/sa/bookinfo-gateway-istio" dst.addr=10.244.1.7:15008 dst.hbone_addr=10.244.1.7:9080 dst.service="productpage.default.svc.cluster.local" dst.workload="productpage-v1-85664dccbc-dpfbp" dst.namespace="default" dst.identity="spiffe://cluster.local/ns/default/sa/bookinfo-productpage" direction="inbound" bytes_sent=409232 bytes_recv=4056 duration="2960ms"
 ```
 
-## Possible implementation compared to the current architecture
+### Practical conclusions from experiments
 
-### Architecture
+- Istio ambient gives strong identity and L4 policy semantics for in-mesh TCP.
+- UDP is out of scope for this provider path.
+- Enforcement is destination/inbound-centric.
+- Attribution is excellent for explicit DENY, partial for ALLOW-miss outcomes.
 
-- We need a DaemonSet to collect ztunnel logs on each node.
-- We need a controller Deployment to aggregate data and create proposals/policies.
-- We need a CRD that supports the Istio authorization policies. Today we only support plain k8s policies.
+## Detailed design
+
+### Goals
+
+- Make Istio the default provider for `learn`, `monitor`, and `protect`
+- Support Calico and Cilium as first-class alternative providers through their gRPC APIs
+- Preserve existing `WorkloadNetworkPolicyProposal` -> `WorkloadNetworkPolicy` lifecycle
+- Keep violations and acknowledgements semantics stable across providers
+
+### Provider model
+
+`network-enforcer` exposes one logical lifecycle with pluggable provider implementations:
+
+1. **Istio provider (default)**
+   - Learning source: ztunnel logs
+   - Monitor source: ztunnel logs + dry-run `AuthorizationPolicy` signals
+   - Protect enforcement: Istio `AuthorizationPolicy`
+
+2. **Calico provider (optional)** (not addressed in this RFC)
+   - Learning/monitor/protect signals from Goldmane gRPC API
+
+3. **Cilium provider (optional)** (not addressed in this RFC)
+   - Learning/monitor/protect signals from Hubble gRPC API
+
+The provider is configured at deployment time. The user-facing CRDs and promotion flow do not change.
+
+### How Istio addresses OBI learning pain points
+
+| OBI issue | Istio (ambient mode) |
+| --- | --- |
+| Learning UDP traffic is unreliable (based on port guessing) | UDP is generally outside ambient L4 scope, so UDP is treated as non-goal for this provider path. |
+| Cross-node traffic resolution can be complex due to SNAT | In-mesh traffic includes workload identity context, reducing dependence on node IP correlation. |
+| Duplicate OTel metrics per connection | Visibility is connection-log based (inbound/outbound views), with explicit control-plane deduplication. |
+| Potential OTel metrics cardinality explosion | The Istio path does not depend on high-cardinality metrics for learning. Log volume remains a scaling concern. |
 
 ### L4 authorization policies limitations
 
 - Istio L4 authorization policies are enforced only on inbound traffic at the destination ztunnel, not on egress: <https://istio.io/latest/docs/ambient/usage/l4-policy/#policy-enforcement-using-ztunnel>. This is a big difference with respect to traditional Kubernetes NetworkPolicies.
 - They apply only to TCP traffic. UDP traffic does not pass through ztunnel, so no L4 policy can be enforced there.
-- They rely on SPIFFE identity for policy matching. The identity is derived from the workload's ServiceAccount. So if a workload does not have a dedicated ServiceAccount, it will use the namespace default ServiceAccount, which can lead to overly permissive policies.
+- They rely on SPIFFE identity for policy matching. The identity is derived from the workload's ServiceAccount. So if a workload does not have a dedicated ServiceAccount, it will use the namespace default ServiceAccount, which can lead to overly permissive policies. -> We could have a KubeWarden policy to guide users to specify a service account for each workload as a best practice.
 - There are scenarios where L4 policies are weak or not applicable:
   - Source pod outside the mesh and destination pod inside the mesh: we can define a policy on the destination, but the source has no SPIFFE identity. In practice, the only option is usually explicit `ipBlocks`, which is fragile.
   - Destination pod outside the mesh and source pod inside the mesh: we cannot enforce an L4 policy because enforcement is inbound-only and no destination ztunnel exists.
@@ -400,7 +452,7 @@ So we don't see the connection from external-ip -> gateway. We only see the conn
 - To learn traffic, we read ztunnel logs (one ztunnel per node).
 - We can learn only TCP traffic, because UDP bypasses ztunnel.
 - Even when one endpoint is outside the mesh and traffic is observable, we often cannot produce a robust L4 policy (see limitations above), so we should avoid generating a proposal in those cases.
-- We probably need to deduplicate traffic flows since we have 2 observations for the same connection (outbound and inbound).
+- We probably need to deduplicate traffic flows since we have 2 observations for the same connection (outbound and inbound). Keeping only the inbound observation is likely sufficient.
 
 ### Monitor phase
 
@@ -412,12 +464,3 @@ So we don't see the connection from external-ip -> gateway. We only see the conn
 
 - We can derive protect violations by scraping ztunnel logs.
 - Policy name attribution is available only for explicit `DENY` matches (same limitation as monitor mode).
-
-### How Istio could mitigate OBI learning issues
-
-| OBI issue | Istio (ambient mode) |
-| --- | --- |
-| Learning UDP traffic is unreliable | UDP traffic is not visible to ztunnel, so UDP is effectively out of scope for L4 policy learning/enforcement. |
-| Cross-node traffic resolution can be complex due to SNAT | For in-mesh traffic, logs include workload identities (SPIFFE), which reduces reliance on node IP correlation and mitigates SNAT ambiguity. |
-| Duplicate OTel metrics per connection | Istio provides connection-level logs (typically outbound at source ztunnel and inbound at destination ztunnel), reducing metric-style duplication for the same flow. |
-| Potential OTel metrics cardinality explosion | If learning is based on ztunnel logs instead of high-cardinality metrics, cardinality pressure is reduced. However, high log volume can still create scaling and storage pressure. |
