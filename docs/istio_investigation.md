@@ -412,3 +412,12 @@ So we don't see the connection from external-ip -> gateway. We only see the conn
 
 - We can derive protect violations by scraping ztunnel logs.
 - Policy name attribution is available only for explicit `DENY` matches (same limitation as monitor mode).
+
+### How Istio could mitigate OBI learning issues
+
+| OBI issue | Istio (ambient mode) |
+| --- | --- |
+| Learning UDP traffic is unreliable | UDP traffic is not visible to ztunnel, so UDP is effectively out of scope for L4 policy learning/enforcement. |
+| Cross-node traffic resolution can be complex due to SNAT | For in-mesh traffic, logs include workload identities (SPIFFE), which reduces reliance on node IP correlation and mitigates SNAT ambiguity. |
+| Duplicate OTel metrics per connection | Istio provides connection-level logs (typically outbound at source ztunnel and inbound at destination ztunnel), reducing metric-style duplication for the same flow. |
+| Potential OTel metrics cardinality explosion | If learning is based on ztunnel logs instead of high-cardinality metrics, cardinality pressure is reduced. However, high log volume can still create scaling and storage pressure. |
