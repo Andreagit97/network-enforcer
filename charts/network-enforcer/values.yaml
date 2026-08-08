@@ -33,6 +33,11 @@ controller:
   podAnnotations: {}
   nodeSelector: {}
   affinity: {}
+  webhook:
+    # todo!: remove this config when we are in a stable state.
+    # Disable admission webhook resources/cert mounts to avoid cert-manager
+    # dependency for now
+    enabled: false
   drainFlowsInterval: 30s
   wnpStatusUpdateInterval: 30s
 

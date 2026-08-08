@@ -83,6 +83,7 @@ func newCniwatcherPod(name, namespace, nodeName, ip string) *corev1.Pod {
 	}
 }
 
+//nolint:unparam // for now some params always receive the same value
 func newProtoViolation(
 	ts time.Time,
 	nodeName string,
@@ -305,64 +306,6 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			t.Parallel()
 			result := tt.sync.correlateViolationsToWNPs(tt.violations, ownedIndex, wnpByKey)
 			tt.check(t, result)
-		})
-	}
-}
-
-func TestScrapeAllNodes(t *testing.T) {
-	t.Parallel()
-
-	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-
-	tests := []struct {
-		name    string
-		clients map[string]grpcexporter.AgentClientAPI
-		check   func(t *testing.T, results []*agentv1.ViolationRecord)
-	}{
-		{
-			name: "scrapes_reachable_nodes_and_skips_unreachable",
-			clients: map[string]grpcexporter.AgentClientAPI{
-				"node-1": &fakeAgentClient{
-					violations: []*agentv1.ViolationRecord{
-						newProtoViolation(
-							ts,
-							"node-1",
-							string(networkingv1.PolicyTypeEgress),
-							"ns1",
-							"app1",
-							"ns2",
-							"svc1",
-							"ns1",
-							"policy-1",
-						),
-					},
-				},
-				"node-2": &fakeAgentClient{shouldFail: true},
-				"node-3": nil, // unreachable
-			},
-			check: func(t *testing.T, results []*agentv1.ViolationRecord) {
-				require.Len(t, results, 1)
-				require.Equal(t, "node-1", results[0].GetNodeName())
-			},
-		},
-		{
-			name:    "empty_clients_map_returns_empty",
-			clients: map[string]grpcexporter.AgentClientAPI{},
-			check: func(t *testing.T, results []*agentv1.ViolationRecord) {
-				require.Empty(t, results)
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			sync := &WorkloadNetworkPolicyStatusSync{
-				agentClientPool: &fakePool{},
-				logger:          ctrl.Log.WithName("test"),
-			}
-			results := sync.scrapeAllNodes(context.Background(), tt.clients)
-			tt.check(t, results)
 		})
 	}
 }
