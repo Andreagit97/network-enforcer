@@ -50,6 +50,9 @@
                     },
                     "additionalProperties": false
                 },
+                "enabled": {
+                    "type": "boolean"
+                },
                 "grpcPort": {
                     "type": "integer"
                 },
