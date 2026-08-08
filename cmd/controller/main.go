@@ -245,13 +245,6 @@ func run(logger *slog.Logger, conf *config) error {
 
 	store := topology.NewStore()
 
-	// The OTLP receiver reuses the same pod cert dir as the ScrapeViolations client.
-	receiver := receiver.NewReceiver(store, conf.otlpPort, conf.wnpStatusSyncConfig.AgentPoolConf.CertDirPath, logger)
-	err = mgr.Add(receiver)
-	if err != nil {
-		return fmt.Errorf("unable to add OTLP receiver to manager: %w", err)
-	}
-
 	// Create the violation ring buffer shared
 	monitorViolationBuffer := violationbuf.NewBuffer()
 

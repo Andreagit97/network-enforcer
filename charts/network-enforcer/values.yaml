@@ -46,7 +46,8 @@ opentelemetry-ebpf-instrumentation: {}
 # Settings for opentelemetry-ebpf-instrumentation
 # @schema additionalProperties:true
 obi:
-  enabled: true
+  # todo!: remove obi config
+  enabled: false
   preset: network
   # opentelemetry-ebpf-instrumentation config
   # @schema additionalProperties:true
