@@ -403,7 +403,7 @@ func main() {
 	flag.Parse()
 
 	slogHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
-	slogger := slog.New(slogHandler).With("component", "agent")
+	slogger := slog.New(slogHandler).With("component", "controller")
 	slog.SetDefault(slogger)
 	ctrl.SetLogger(logr.FromSlogHandler(slogger.Handler()))
 
