@@ -100,7 +100,8 @@ obi:
           csi.cert-manager.io/dns-names: ${POD_NAME}.${POD_NAMESPACE}
 
 telemetry:
-  collectorStrategy: "default" # @schema enum: [none, default, external]
+  # todo!: restore default otel collector
+  collectorStrategy: "none" # @schema enum: [none, default, external]
   defaultCollector:
     image:
       repository: otel/opentelemetry-collector-contrib
