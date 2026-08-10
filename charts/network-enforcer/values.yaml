@@ -44,67 +44,6 @@ controller:
 kubernetesClusterDomain: cluster.local
 imagePullSecrets: []
 
-# The original dependency name is needed for Helm v4 dependency processing.
-# @schema additionalProperties:true
-opentelemetry-ebpf-instrumentation: {}
-
-# Settings for opentelemetry-ebpf-instrumentation
-# @schema additionalProperties:true
-obi:
-  # todo!: remove obi config
-  enabled: false
-  preset: network
-  # opentelemetry-ebpf-instrumentation config
-  # @schema additionalProperties:true
-  config:
-    # opentelemetry-ebpf-instrumentation config data block
-    # @schema additionalProperties:true
-    data:
-      otel_metrics_export:
-        # https scheme + protocol: grpc -> OBI uses otlpmetricgrpc.New() which
-        # honours the standard OTEL env-based TLS autoconfig.
-        endpoint: https://network-enforcer-otlp:4317
-        protocol: grpc
-        interval: 30s
-      otel_traces_export:
-        # NOTE: Traces stay disabled because OBI's trace path uses the Collector
-        # exporters (otlphttpexporter/otlpexporter) with configtls.ClientConfig
-        # fields left unset, so env-based client certs are ignored there; requires
-        # an upstream OBI fix.
-        endpoint: ""
-      attributes:
-        kubernetes:
-          enable: true
-        select:
-          obi_network_flow_bytes:
-            include: ["*"]
-      metrics:
-        features:
-          - network
-
-  # mTLS is mandatory-on for OBI: certificates are issued per-pod by cert-manager
-  # via the CSI driver (csi.cert-manager.io). The metrics OTLP exporter uses the
-  # standard OTEL env vars for client-cert authentication.
-  env:
-    OTEL_EXPORTER_OTLP_METRICS_CERTIFICATE: /etc/network-enforcer/certs/ca.crt
-    OTEL_EXPORTER_OTLP_METRICS_CLIENT_CERTIFICATE: /etc/network-enforcer/certs/tls.crt
-    OTEL_EXPORTER_OTLP_METRICS_CLIENT_KEY: /etc/network-enforcer/certs/tls.key
-
-  volumeMounts:
-    - name: obi-mtls-certs
-      mountPath: /etc/network-enforcer/certs
-      readOnly: true
-
-  volumes:
-    - name: obi-mtls-certs
-      csi:
-        driver: csi.cert-manager.io
-        readOnly: true
-        volumeAttributes:
-          csi.cert-manager.io/issuer-name: network-enforcer-ca
-          csi.cert-manager.io/issuer-kind: Issuer
-          csi.cert-manager.io/dns-names: ${POD_NAME}.${POD_NAMESPACE}
-
 telemetry:
   # todo!: restore default otel collector
   collectorStrategy: "none" # @schema enum: [none, default, external]

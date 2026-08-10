@@ -142,10 +142,3 @@ Certificate helpers for mTLS (CA issuer and secret share a name).
 {{- define "network-enforcer.caSecretName" -}}
 {{ include "network-enforcer.fullname" . }}-ca
 {{- end -}}
-
-{{/*
-Certificate directory for OBI mTLS.
-*/}}
-{{- define "network-enforcer.obi.certDir" -}}
-/etc/network-enforcer/certs
-{{- end -}}

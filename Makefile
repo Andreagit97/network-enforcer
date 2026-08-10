@@ -255,9 +255,6 @@ ifeq ($(E2E_NO_REBUILD),)
 	$(MAKE) build-controller-image
 endif
 endif
-	@echo "🧪 Building chart dependencies..."
-	helm repo add --force-update open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
-	helm dependency build charts/network-enforcer
 	@echo "🧪 Running e2e tests with '$(E2E_CNI)' CNI..."
 	E2E_USE_EXISTING_CLUSTER=$(E2E_USE_EXISTING_CLUSTER) E2E_DEPENDENCIES=$(E2E_DEPENDENCIES) go test -v ./test/e2e/... -count=1
 
