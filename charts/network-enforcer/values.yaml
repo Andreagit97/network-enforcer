@@ -16,11 +16,11 @@ controller:
     pullPolicy: IfNotPresent
   resources:
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: 100m
+      memory: 256Mi
     requests:
-      cpu: 500m
-      memory: 512Mi
+      cpu: 100m
+      memory: 256Mi
   podSecurityContext:
     runAsNonRoot: true
     seccompProfile:
@@ -33,6 +33,11 @@ controller:
   podAnnotations: {}
   nodeSelector: {}
   affinity: {}
+  webhook:
+    # todo!: remove this config when we are in a stable state.
+    # Disable admission webhook resources/cert mounts to avoid cert-manager
+    # dependency for now
+    enabled: false
   drainFlowsInterval: 30s
   wnpStatusUpdateInterval: 30s
 
@@ -46,7 +51,8 @@ opentelemetry-ebpf-instrumentation: {}
 # Settings for opentelemetry-ebpf-instrumentation
 # @schema additionalProperties:true
 obi:
-  enabled: true
+  # todo!: remove obi config
+  enabled: false
   preset: network
   # opentelemetry-ebpf-instrumentation config
   # @schema additionalProperties:true
@@ -100,7 +106,8 @@ obi:
           csi.cert-manager.io/dns-names: ${POD_NAME}.${POD_NAMESPACE}
 
 telemetry:
-  collectorStrategy: "default" # @schema enum: [none, default, external]
+  # todo!: restore default otel collector
+  collectorStrategy: "none" # @schema enum: [none, default, external]
   defaultCollector:
     image:
       repository: otel/opentelemetry-collector-contrib
@@ -137,6 +144,8 @@ telemetry:
     otelCollectorClientCertificateSecret: ""
 
 cniwatcher:
+  # todo!: remove cniwatcher config
+  enabled: false
   # Valid values: aws-vpc, calico, cilium, flannel
   cniType: calico
   # Port for the gRPC ScrapeViolations server. The controller scrapes violations

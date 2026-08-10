@@ -63,14 +63,8 @@ func NewWorkloadNetworkPolicyStatusSync(
 		return nil, fmt.Errorf("invalid update interval: %v", config.UpdateInterval)
 	}
 
-	agentClientPool, err := grpcexporter.NewAgentClientPool(config.AgentPoolConf)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create agent client pool: %w", err)
-	}
-
 	return &WorkloadNetworkPolicyStatusSync{
 		Client:                 c,
-		agentClientPool:        agentClientPool,
 		updateInterval:         config.UpdateInterval,
 		eventLogger:            config.EventLogger,
 		monitorViolationBuffer: config.MonitorViolationBuffer,
@@ -148,19 +142,10 @@ func (r *WorkloadNetworkPolicyStatusSync) sync(ctx context.Context) error {
 		return fmt.Errorf("failed to build ownership index: %w", err)
 	}
 
-	clients, err := r.agentClientPool.UpdatePool(ctx, r.Client)
-	if err != nil {
-		return fmt.Errorf("failed to update agent client pool: %w", err)
-	}
-
-	// protect violations coming from the agents
-	scraped := r.scrapeAllNodes(ctx, clients)
-
 	// monitor violations coming from the topology scraper
 	monitorViolation := convertMonitorViolations(r.monitorViolationBuffer.Drain())
-	scraped = append(scraped, monitorViolation...)
 	// Group scraped violations by the owning WNP
-	violationsByWNP := r.correlateViolationsToWNPs(scraped, ownedIndex, wnpByKey)
+	violationsByWNP := r.correlateViolationsToWNPs(monitorViolation, ownedIndex, wnpByKey)
 
 	// Process every WNP: those with scraped violations get them merged;
 	// those without still get clearAllowedViolations + acknowledgeViolationsFromAnnotations.
@@ -220,33 +205,6 @@ func findWNPOwnerRef(
 		}
 	}
 	return types.NamespacedName{}, false
-}
-
-// scrapeAllNodes scrapes violations from all reachable nodes;
-// unreachable nodes are marked stale.
-func (r *WorkloadNetworkPolicyStatusSync) scrapeAllNodes(
-	ctx context.Context,
-	clients map[string]grpcexporter.AgentClientAPI,
-) []*agentv1.ViolationRecord {
-	var all []*agentv1.ViolationRecord
-
-	for nodeName, client := range clients {
-		if client == nil {
-			r.logger.V(1).Info("Skipping unreachable node", "node", nodeName)
-			continue
-		}
-
-		violations, err := client.ScrapeViolations(ctx)
-		if err != nil {
-			r.agentClientPool.MarkStaleAgentClient(nodeName)
-			r.logger.Error(err, "Failed to scrape violations", "node", nodeName)
-			continue
-		}
-
-		all = append(all, violations...)
-	}
-
-	return all
 }
 
 // correlateViolationsToWNPs groups scraped violations by the owning WNP.

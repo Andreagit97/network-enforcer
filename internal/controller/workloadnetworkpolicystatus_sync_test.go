@@ -83,6 +83,7 @@ func newCniwatcherPod(name, namespace, nodeName, ip string) *corev1.Pod {
 	}
 }
 
+//nolint:unparam // for now some params always receive the same value
 func newProtoViolation(
 	ts time.Time,
 	nodeName string,
@@ -305,64 +306,6 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			t.Parallel()
 			result := tt.sync.correlateViolationsToWNPs(tt.violations, ownedIndex, wnpByKey)
 			tt.check(t, result)
-		})
-	}
-}
-
-func TestScrapeAllNodes(t *testing.T) {
-	t.Parallel()
-
-	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-
-	tests := []struct {
-		name    string
-		clients map[string]grpcexporter.AgentClientAPI
-		check   func(t *testing.T, results []*agentv1.ViolationRecord)
-	}{
-		{
-			name: "scrapes_reachable_nodes_and_skips_unreachable",
-			clients: map[string]grpcexporter.AgentClientAPI{
-				"node-1": &fakeAgentClient{
-					violations: []*agentv1.ViolationRecord{
-						newProtoViolation(
-							ts,
-							"node-1",
-							string(networkingv1.PolicyTypeEgress),
-							"ns1",
-							"app1",
-							"ns2",
-							"svc1",
-							"ns1",
-							"policy-1",
-						),
-					},
-				},
-				"node-2": &fakeAgentClient{shouldFail: true},
-				"node-3": nil, // unreachable
-			},
-			check: func(t *testing.T, results []*agentv1.ViolationRecord) {
-				require.Len(t, results, 1)
-				require.Equal(t, "node-1", results[0].GetNodeName())
-			},
-		},
-		{
-			name:    "empty_clients_map_returns_empty",
-			clients: map[string]grpcexporter.AgentClientAPI{},
-			check: func(t *testing.T, results []*agentv1.ViolationRecord) {
-				require.Empty(t, results)
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			sync := &WorkloadNetworkPolicyStatusSync{
-				agentClientPool: &fakePool{},
-				logger:          ctrl.Log.WithName("test"),
-			}
-			results := sync.scrapeAllNodes(context.Background(), tt.clients)
-			tt.check(t, results)
 		})
 	}
 }
@@ -615,54 +558,6 @@ func TestAgentClientPoolUpdatePool(t *testing.T) {
 	// Mark a client stale and verify it becomes nil.
 	pool.MarkStaleAgentClient("node-1")
 	require.Nil(t, clients["node-1"])
-}
-
-// TestSyncLoopIntegration runs a full sync cycle with real fake objects.
-func TestSyncLoopIntegration(t *testing.T) {
-	t.Parallel()
-
-	now := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
-
-	wnp := newTestWNP("my-policy", "default")
-	ownedNP := newOwnedNetworkPolicy(wnp)
-
-	// Build the fake client with the WNP and its owned NetworkPolicy.
-	s := newTestScheme()
-	statusObj := &securityv1alpha1.WorkloadNetworkPolicy{}
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(s).
-		WithStatusSubresource(statusObj).
-		WithObjects(wnp, ownedNP).
-		Build()
-
-	// Create a fake pool that returns one node with a violation.
-	pool := &fakePool{
-		nodeClients: map[string]grpcexporter.AgentClientAPI{
-			"node-1": &fakeAgentClient{
-				violations: []*agentv1.ViolationRecord{
-					newProtoViolation(now, "node-1", string(networkingv1.PolicyTypeEgress),
-						"src-ns", "src-app", "dst-ns", "dst-svc",
-						"default", "my-policy"),
-				},
-			},
-		},
-	}
-
-	sync := newTestWorkloadNetworkStatusSync(fakeClient).withPool(pool)
-	require.NoError(t, sync.sync(t.Context()))
-
-	// Verify the WNP status was updated.
-	var updatedWNP securityv1alpha1.WorkloadNetworkPolicy
-	require.NoError(t, fakeClient.Get(
-		context.Background(),
-		types.NamespacedName{Namespace: "default", Name: "my-policy"},
-		&updatedWNP,
-	))
-	require.Equal(t, int64(1), updatedWNP.Status.ViolationCount)
-	require.Equal(t, int64(1), updatedWNP.Status.ActiveViolationCount)
-	require.Len(t, updatedWNP.Status.Violations, 1)
-	require.Equal(t, networkingv1.PolicyTypeEgress, updatedWNP.Status.Violations[0].Direction)
-	require.Equal(t, "src-app", updatedWNP.Status.Violations[0].Source.OwnerName)
 }
 
 func TestSyncClearsViolationsWithNoNewScrapedViolations(t *testing.T) {
