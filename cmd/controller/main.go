@@ -44,13 +44,11 @@ import (
 	"github.com/rancher-sandbox/network-enforcer/internal/controller"
 	"github.com/rancher-sandbox/network-enforcer/internal/events"
 	"github.com/rancher-sandbox/network-enforcer/internal/scraper"
-	"github.com/rancher-sandbox/network-enforcer/internal/topology"
 	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
 	// +kubebuilder:scaffold:imports
 )
 
 const (
-	defaultDrainFlowsInterval      = 30 * time.Second
 	defaultWnpStatusUpdateInterval = 30 * time.Second
 	// otlpLogShutdownTimeout bounds the final flush of buffered log records
 	// when the manager stops. The manager context is already cancelled at
@@ -88,7 +86,6 @@ type config struct {
 	enableHTTP2          bool
 	otlpPort             int
 	otel                 otelConf
-	drainFlowsInterval   time.Duration
 	tlsOpts              []func(*tls.Config)
 	wnpStatusSyncConfig  controller.WorkloadNetworkPolicyStatusSyncConfig
 }
@@ -239,23 +236,8 @@ func run(logger *slog.Logger, conf *config) error {
 		}
 	}
 
-	store := topology.NewStore()
-
 	// Create the violation ring buffer shared
 	monitorViolationBuffer := violationbuf.NewBuffer()
-
-	scanner := controller.NewTopologyScanner(
-		mgr.GetClient(),
-		store,
-		logger,
-		conf.drainFlowsInterval,
-		monitorViolationBuffer,
-		eventLogger,
-	)
-	err = mgr.Add(scanner)
-	if err != nil {
-		return fmt.Errorf("unable to add topology scanner to manager: %w", err)
-	}
 
 	learningReconciler := controller.NewLearningReconciler(mgr.GetClient())
 	if err = learningReconciler.SetupWithManager(mgr); err != nil {
@@ -263,7 +245,7 @@ func run(logger *slog.Logger, conf *config) error {
 	}
 
 	// todo!: Here the controller should know the cni to understand which scraper we need to run. At the moment we suppose we are always on Istio.
-	scraper := scraper.NewIstioScraper(scraper.IstioScraperConfig{
+	istioScraper := scraper.NewIstioScraper(scraper.IstioScraperConfig{
 		ViolationBuffer:      monitorViolationBuffer,
 		EnqueueLearningEvent: learningReconciler.GetEnqueueFunc(),
 		Logger:               logger.With("component", "istio-scraper"),
@@ -271,9 +253,9 @@ func run(logger *slog.Logger, conf *config) error {
 			Port: conf.otlpPort,
 		},
 	})
-	err = mgr.Add(scraper)
+	err = mgr.Add(istioScraper)
 	if err != nil {
-		return fmt.Errorf("unable to add topology scanner to manager: %w", err)
+		return fmt.Errorf("unable to add istio scraper to manager: %w", err)
 	}
 
 	if err = setupControllers(ctx, logger, mgr, conf, eventLogger, monitorViolationBuffer); err != nil {
@@ -393,8 +375,6 @@ func main() {
 		os.Getenv("OTEL_EXPORTER_OTLP_CLIENT_KEY"),
 		"Path to the client TLS key for mTLS with the OTLP log collector. "+
 			"Defaults to the OTEL_EXPORTER_OTLP_CLIENT_KEY env var.")
-	flag.DurationVar(&conf.drainFlowsInterval, "drain-flows-interval",
-		defaultDrainFlowsInterval, "The interval at which flows are drained.")
 	flag.DurationVar(&conf.wnpStatusSyncConfig.UpdateInterval,
 		"wnp-status-reconciler-update-interval",
 		defaultWnpStatusUpdateInterval,

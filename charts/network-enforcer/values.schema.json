@@ -39,9 +39,6 @@
                     },
                     "additionalProperties": false
                 },
-                "drainFlowsInterval": {
-                    "type": "string"
-                },
                 "env": {
                     "type": "array"
                 },
