@@ -27,7 +27,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Build image
-        uses: rancher-sandbox/runtime-enforcer/.github/actions/container-build@9fe610d3c44031aae52ccf1e9f34205432a84c3d
+        uses: rancher-sandbox/runtime-enforcer/.github/actions/container-build@57cc5aeb8c5d00c59ed40b4532c5c645b0311101
         with:
           arch: ${{ matrix.arch }}
           dockerfile: package/Dockerfile.${{ matrix.component }}
