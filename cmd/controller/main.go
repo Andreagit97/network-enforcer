@@ -43,6 +43,7 @@ import (
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/controller"
 	"github.com/rancher-sandbox/network-enforcer/internal/events"
+	"github.com/rancher-sandbox/network-enforcer/internal/scraper"
 	"github.com/rancher-sandbox/network-enforcer/internal/topology"
 	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
 	// +kubebuilder:scaffold:imports
@@ -252,6 +253,24 @@ func run(logger *slog.Logger, conf *config) error {
 		eventLogger,
 	)
 	err = mgr.Add(scanner)
+	if err != nil {
+		return fmt.Errorf("unable to add topology scanner to manager: %w", err)
+	}
+
+	// Shared learning channel
+	const learningChannelSize = 10000
+	learningChannel := make(chan struct{}, learningChannelSize)
+
+	// todo!: Here the controller should know the cni to understand which scraper we need to run. At the moment we suppose we are always on Istio.
+	scraper := scraper.NewIstioScraper(scraper.IstioScraperConfig{
+		ViolationBuffer: monitorViolationBuffer,
+		LearningChannel: learningChannel,
+		Logger:          logger.With("component", "istio-scraper"),
+		OTLPConf: scraper.OTLPConf{
+			Port: conf.otlpPort,
+		},
+	})
+	err = mgr.Add(scraper)
 	if err != nil {
 		return fmt.Errorf("unable to add topology scanner to manager: %w", err)
 	}
