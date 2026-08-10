@@ -257,15 +257,16 @@ func run(logger *slog.Logger, conf *config) error {
 		return fmt.Errorf("unable to add topology scanner to manager: %w", err)
 	}
 
-	// Shared learning channel
-	const learningChannelSize = 10000
-	learningChannel := make(chan struct{}, learningChannelSize)
+	learningReconciler := controller.NewLearningReconciler(mgr.GetClient())
+	if err = learningReconciler.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create learning reconciler: %w", err)
+	}
 
 	// todo!: Here the controller should know the cni to understand which scraper we need to run. At the moment we suppose we are always on Istio.
 	scraper := scraper.NewIstioScraper(scraper.IstioScraperConfig{
-		ViolationBuffer: monitorViolationBuffer,
-		LearningChannel: learningChannel,
-		Logger:          logger.With("component", "istio-scraper"),
+		ViolationBuffer:      monitorViolationBuffer,
+		EnqueueLearningEvent: learningReconciler.GetEnqueueFunc(),
+		Logger:               logger.With("component", "istio-scraper"),
 		OTLPConf: scraper.OTLPConf{
 			Port: conf.otlpPort,
 		},

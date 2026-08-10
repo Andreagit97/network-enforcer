@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
 	otellog "go.opentelemetry.io/otel/log"
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
@@ -22,13 +23,26 @@ type OTLPConf struct {
 	Port int
 }
 
+type LearningEnqueueFunc func(types.LearningEvent) bool
+
+const (
+	// keys.
+	eventTypeKey    = "evt.type"
+	srcIdentityKey  = "src.identity"
+	dstNamespaceKey = "dst.namespace"
+	dstNameKey      = "dst.name"
+	dstPortKey      = "dst.port"
+
+	eventTypeLearn = "learn"
+)
+
 // IstioScraperConfig configures IstioScraper.
 type IstioScraperConfig struct {
-	ViolationBuffer     *violationbuf.Buffer
-	LearningChannel     chan<- struct{}
-	Logger              *slog.Logger
-	ViolationOtelLogger otellog.Logger
-	OTLPConf            OTLPConf
+	ViolationBuffer      *violationbuf.Buffer
+	EnqueueLearningEvent LearningEnqueueFunc
+	Logger               *slog.Logger
+	ViolationOtelLogger  otellog.Logger
+	OTLPConf             OTLPConf
 }
 
 // IstioScraper receives OTLP log events from istio-watchers.
@@ -111,6 +125,18 @@ func (s *IstioScraper) Export(
 			for _, record := range scopeLogs.GetLogRecords() {
 				attrs := mergeAttrMaps(resourceAttrs, attrMap(record.GetAttributes()))
 				s.Logger.InfoContext(ctx, "Received OTLP log record", "attrs", attrs)
+				if attrs[eventTypeKey] != eventTypeLearn {
+					s.Logger.WarnContext(ctx, "Unexpected event type", eventTypeKey, attrs[eventTypeKey])
+				}
+				if !s.EnqueueLearningEvent(types.LearningEvent{
+					DstName:      attrs[dstNameKey],
+					DstNamespace: attrs[dstNamespaceKey],
+					DstPort:      attrs[dstPortKey],
+					SrcIdentity:  attrs[srcIdentityKey],
+				}) {
+					// todo!: we can consider some rate limiting here
+					s.Logger.WarnContext(ctx, "Failed to enqueue learning event, channel is full")
+				}
 			}
 		}
 	}

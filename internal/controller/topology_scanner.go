@@ -22,6 +22,8 @@ import (
 	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
 )
 
+// todo!: after the refactor we can remove the topology scanner.
+
 // +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets;daemonsets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods;services;namespaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=security.rancher.io,resources=workloadnetworkpolicyproposals,verbs=get;list;watch;create;update;patch;delete
