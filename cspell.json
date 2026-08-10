@@ -101,7 +101,6 @@
         "ulogd",
         "unmarshals",
         "utilruntime",
-        "cniwatcher",
     ],
     "ignoreWords": [
         "corev1",

@@ -398,7 +398,7 @@ func main() {
 	flag.DurationVar(&conf.wnpStatusSyncConfig.UpdateInterval,
 		"wnp-status-reconciler-update-interval",
 		defaultWnpStatusUpdateInterval,
-		"The interval at which WorkloadNetworkPolicy status is synced with cniwatcher pods.")
+		"The interval at which WorkloadNetworkPolicy status is synced.")
 	flag.Parse()
 
 	slogHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})

@@ -14,7 +14,7 @@ jobs:
   build:
     strategy:
       matrix:
-        component: [controller, cniwatcher]
+        component: [controller]
         arch: [amd64, arm64]
         include:
           - arch: amd64
@@ -49,7 +49,7 @@ jobs:
       id-token: write
     strategy:
       matrix:
-        component: [controller, cniwatcher]
+        component: [controller]
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
