@@ -6,6 +6,7 @@ const (
 	KindDeployment  Kind = "Deployment"
 	KindStatefulSet Kind = "StatefulSet"
 	KindDaemonSet   Kind = "DaemonSet"
+	KindReplicaSet  Kind = "ReplicaSet"
 	KindService     Kind = "Service"
 	KindCronJob     Kind = "CronJob"
 )
