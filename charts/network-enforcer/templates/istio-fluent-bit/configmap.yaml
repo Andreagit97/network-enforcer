@@ -75,12 +75,25 @@ data:
       return port
     end
 
-    function to_otel(tag, timestamp, record)
-      -- Check if this is a learning event
-      if record["message"] ~= "connection complete" then
-        return -1, timestamp, record
-      end
+    local function to_monitor_event(timestamp, record)
+      local proxy = record["proxy"] or {}
+      local inbound = record["inbound"] or {}
 
+      local out = {}
+      out["evt.type"] = "monitor"
+      -- `namespace/name` format
+      -- e.g. "default/http-server-7bbf596dd9-8gs65"
+      out["dst.namespaced_name"] = proxy["wl"] or ""
+      -- `namespace/name` format if present, otherwise ""
+      -- e.g. "default/deny-http-server-monitor"
+      out["policy"] = record["policy"]
+      -- `ip:port` format
+      out["src.ip"] = inbound["peer"] or ""
+      out["body"] = "monitor"
+      return 1, timestamp, out
+    end
+
+    local function to_learn_event(timestamp, record)
       -- We are only interested in inbound connections
       if record["direction"] ~= "inbound" then
         return -1, timestamp, record
@@ -96,4 +109,18 @@ data:
       -- todo! check if there is an alternative way
       out["body"] = "learn"
       return 1, timestamp, out
+    end
+
+    function to_otel(tag, timestamp, record)
+      local message = record["message"]
+
+      -- The log message should start with `dry-run:`
+      if string.find(message or "", "^dry%-run:") then
+        return to_monitor_event(timestamp, record)
+      end
+
+      if record["message"] == "connection complete" then
+        return to_learn_event(timestamp, record)
+      end
+      return -1, timestamp, record
     end
