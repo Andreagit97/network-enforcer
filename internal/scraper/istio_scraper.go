@@ -27,13 +27,18 @@ type LearningEnqueueFunc func(types.LearningEvent) bool
 
 const (
 	// keys.
-	eventTypeKey    = "evt.type"
-	srcIdentityKey  = "src.identity"
-	dstNamespaceKey = "dst.namespace"
-	dstNameKey      = "dst.name"
-	dstPortKey      = "dst.port"
+	eventTypeKey         = "evt.type"
+	srcIdentityKey       = "src.identity"
+	dstNamespaceKey      = "dst.namespace"
+	dstNameKey           = "dst.name"
+	dstPortKey           = "dst.port"
+	bodyKey              = "body"
+	policyKey            = "policy"
+	dstNamespacedNameKey = "dst.namespaced_name"
+	srcIPKey             = "src.ip"
 
-	eventTypeLearn = "learn"
+	eventTypeLearn   = "learn"
+	eventTypeMonitor = "monitor"
 )
 
 // IstioScraperConfig configures IstioScraper.
