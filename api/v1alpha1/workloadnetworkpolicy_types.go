@@ -42,17 +42,13 @@ const (
 
 // WorkloadNetworkPolicySpec defines the desired state of a WorkloadNetworkPolicy.
 type WorkloadNetworkPolicySpec struct {
+	PolicyBackendSpec `json:",inline"`
+
 	// Mode controls whether the policy is observed (monitor) or actively
 	// enforced (protect). Defaults to monitor.
 	// +kubebuilder:default=monitor
 	// +optional
 	Mode WorkloadNetworkPolicyMode `json:"mode,omitempty"`
-
-	// PolicyTemplate is the embedded networking.k8s.io NetworkPolicySpec that
-	// this resource represents at runtime. The semantics of the policy are
-	// selected by Mode; the spec itself is identical to a NetworkPolicySpec.
-	// +required
-	PolicyTemplate networkingv1.NetworkPolicySpec `json:"policyTemplate"`
 }
 
 // WorkloadRef identifies a Kubernetes workload by its namespace, owner kind,

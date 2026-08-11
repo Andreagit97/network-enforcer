@@ -430,7 +430,10 @@ func TestClearAllowedViolations(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			wnp := &WorkloadNetworkPolicy{
 				Spec: WorkloadNetworkPolicySpec{
-					PolicyTemplate: tt.template,
+					PolicyBackendSpec: PolicyBackendSpec{
+						Backend:    PolicyBackendKubernetes,
+						Kubernetes: &tt.template,
+					},
 				},
 				Status: WorkloadNetworkPolicyStatus{
 					Violations: tt.violations,
@@ -644,22 +647,25 @@ func TestRecomputeStatus(t *testing.T) {
 
 		wnp := &WorkloadNetworkPolicy{
 			Spec: WorkloadNetworkPolicySpec{
-				PolicyTemplate: networkingv1.NetworkPolicySpec{
-					Egress: []networkingv1.NetworkPolicyEgressRule{
-						{
-							To: []networkingv1.NetworkPolicyPeer{
-								{
-									NamespaceSelector: &metav1.LabelSelector{
-										MatchLabels: map[string]string{
-											corev1.LabelMetadataName: "ns2",
+				PolicyBackendSpec: PolicyBackendSpec{
+					Backend: PolicyBackendKubernetes,
+					Kubernetes: &networkingv1.NetworkPolicySpec{
+						Egress: []networkingv1.NetworkPolicyEgressRule{
+							{
+								To: []networkingv1.NetworkPolicyPeer{
+									{
+										NamespaceSelector: &metav1.LabelSelector{
+											MatchLabels: map[string]string{
+												corev1.LabelMetadataName: "ns2",
+											},
 										},
 									},
 								},
-							},
-							Ports: []networkingv1.NetworkPolicyPort{
-								{
-									Protocol: &([]corev1.Protocol{corev1.ProtocolTCP}[0]),
-									Port:     &([]intstr.IntOrString{intstr.FromInt32(80)}[0]),
+								Ports: []networkingv1.NetworkPolicyPort{
+									{
+										Protocol: &([]corev1.Protocol{corev1.ProtocolTCP}[0]),
+										Port:     &([]intstr.IntOrString{intstr.FromInt32(80)}[0]),
+									},
 								},
 							},
 						},

@@ -571,7 +571,7 @@ func TestSyncClearsViolationsWithNoNewScrapedViolations(t *testing.T) {
 	wnp := newTestWNP("policy-1", "ns1")
 	// Add an egress rule to the policy template that permits the traffic
 	// that was previously denied and recorded as a violation.
-	wnp.Spec.PolicyTemplate.Egress = []networkingv1.NetworkPolicyEgressRule{
+	wnp.Spec.Kubernetes.Egress = []networkingv1.NetworkPolicyEgressRule{
 		{
 			To: []networkingv1.NetworkPolicyPeer{
 				{

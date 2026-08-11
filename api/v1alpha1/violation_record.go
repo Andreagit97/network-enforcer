@@ -54,16 +54,22 @@ func (v ViolationRecord) Key() ViolationRecordKey {
 // clearAllowedViolations drops violations whose flow matches a policyTemplate
 // rule via exact structural comparison (EgressRuleEqual / IngressRuleEqual).
 func (wnp *WorkloadNetworkPolicy) clearAllowedViolations() {
+	if !wnp.Spec.IsKubernetesBackend() {
+		// todo!: for now we clear the violations only if the backend is k8s
+		return
+	}
+
+	policyTemplate := wnp.Spec.Kubernetes
 	wnp.Status.Violations = slices.DeleteFunc(wnp.Status.Violations, func(v ViolationRecord) bool {
 		switch v.Direction {
 		case networkingv1.PolicyTypeEgress:
-			for _, rule := range wnp.Spec.PolicyTemplate.Egress {
+			for _, rule := range policyTemplate.Egress {
 				if EgressRuleEqual(v.ToEgressRule(), rule) {
 					return true
 				}
 			}
 		case networkingv1.PolicyTypeIngress:
-			for _, rule := range wnp.Spec.PolicyTemplate.Ingress {
+			for _, rule := range policyTemplate.Ingress {
 				if IngressRuleEqual(v.ToIngressRule(), rule) {
 					return true
 				}

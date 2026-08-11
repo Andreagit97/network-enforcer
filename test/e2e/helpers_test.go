@@ -112,26 +112,26 @@ func assertEqualNetworkPolicyProposal(
 	// Spec
 	assert.ElementsMatch(
 		t,
-		expected.Spec.PolicyTypes,
-		actual.Spec.PolicyTypes,
+		expected.Spec.Kubernetes.PolicyTypes,
+		actual.Spec.Kubernetes.PolicyTypes,
 		"network policy proposal policy types do not match expected",
 	)
 	assert.Equal(
 		t,
-		expected.Spec.PodSelector,
-		actual.Spec.PodSelector,
+		expected.Spec.Kubernetes.PodSelector,
+		actual.Spec.Kubernetes.PodSelector,
 		"network policy proposal pod selector does not match expected",
 	)
 	assert.ElementsMatch(
 		t,
-		expected.Spec.Ingress,
-		actual.Spec.Ingress,
+		expected.Spec.Kubernetes.Ingress,
+		actual.Spec.Kubernetes.Ingress,
 		"network policy proposal ingress rules do not match expected",
 	)
 	assert.ElementsMatch(
 		t,
-		expected.Spec.Egress,
-		actual.Spec.Egress,
+		expected.Spec.Kubernetes.Egress,
+		actual.Spec.Kubernetes.Egress,
 		"network policy proposal egress rules do not match expected",
 	)
 }

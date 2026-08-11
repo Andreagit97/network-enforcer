@@ -37,29 +37,34 @@ func newBaseProposal() *securityv1alpha1.WorkloadNetworkPolicyProposal {
 	portDNS := intstr.FromInt32(53)
 	return &securityv1alpha1.WorkloadNetworkPolicyProposal{
 		ObjectMeta: metav1.ObjectMeta{Name: "example", Namespace: "default"},
-		Spec: networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": "example",
-				},
-			},
-			PolicyTypes: []networkingv1.PolicyType{
-				networkingv1.PolicyTypeEgress,
-			},
-
-			Egress: []networkingv1.NetworkPolicyEgressRule{
-				{
-					To: []networkingv1.NetworkPolicyPeer{
-						{
-							IPBlock: &networkingv1.IPBlock{
-								CIDR: "10.0.0.10/32",
-							},
+		Spec: securityv1alpha1.WorkloadNetworkPolicyProposalSpec{
+			PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+				Backend: securityv1alpha1.PolicyBackendKubernetes,
+				Kubernetes: &networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"app": "example",
 						},
 					},
-					Ports: []networkingv1.NetworkPolicyPort{
+					PolicyTypes: []networkingv1.PolicyType{
+						networkingv1.PolicyTypeEgress,
+					},
+
+					Egress: []networkingv1.NetworkPolicyEgressRule{
 						{
-							Protocol: &protocolUDP,
-							Port:     &portDNS,
+							To: []networkingv1.NetworkPolicyPeer{
+								{
+									IPBlock: &networkingv1.IPBlock{
+										CIDR: "10.0.0.10/32",
+									},
+								},
+							},
+							Ports: []networkingv1.NetworkPolicyPort{
+								{
+									Protocol: &protocolUDP,
+									Port:     &portDNS,
+								},
+							},
 						},
 					},
 				},
@@ -141,7 +146,9 @@ func TestWorkloadNetworkPolicyProposalReconciler(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, securityv1alpha1.WorkloadNetworkPolicyModeMonitor, p.Spec.Mode)
 				require.True(t, p.HasPromotedLabel(baseProposal.Name))
-				require.Equal(t, baseProposal.Spec, p.Spec.PolicyTemplate)
+				require.Equal(t, baseProposal.Spec.Backend, p.Spec.Backend)
+				require.Equal(t, baseProposal.Spec.Kubernetes, p.Spec.Kubernetes)
+				require.Equal(t, baseProposal.Spec.Istio, p.Spec.Istio)
 			},
 		},
 		{
@@ -157,7 +164,9 @@ func TestWorkloadNetworkPolicyProposalReconciler(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, securityv1alpha1.WorkloadNetworkPolicyModeProtect, p.Spec.Mode)
 				require.True(t, p.HasPromotedLabel(baseProposal.Name))
-				require.Equal(t, baseProposal.Spec, p.Spec.PolicyTemplate)
+				require.Equal(t, baseProposal.Spec.Backend, p.Spec.Backend)
+				require.Equal(t, baseProposal.Spec.Kubernetes, p.Spec.Kubernetes)
+				require.Equal(t, baseProposal.Spec.Istio, p.Spec.Istio)
 			},
 		},
 		{
