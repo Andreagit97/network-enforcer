@@ -15,10 +15,6 @@ namespace_create(release_namespace)
 
 controller_image = settings.get("controller").get("image")
 
-# allow the override of the CNI from command line
-config.define_string("cni")
-cfg = config.parse()
-
 # Prepare Helm set values based on CNI type
 helm_set_values = [
     "controller.image.repository=" + controller_image,
