@@ -131,7 +131,7 @@ func (s *IstioScraper) Export(
 				attrs := mergeAttrMaps(resourceAttrs, attrMap(record.GetAttributes()))
 				s.Logger.InfoContext(ctx, "Received OTLP log record", "attrs", attrs)
 				if attrs[eventTypeKey] != eventTypeLearn {
-					s.Logger.WarnContext(ctx, "Unexpected event type", eventTypeKey, attrs[eventTypeKey])
+					// todo!: we need to handle other events, monitor/protect
 					continue
 				}
 				if !s.EnqueueLearningEvent(types.LearningEvent{
