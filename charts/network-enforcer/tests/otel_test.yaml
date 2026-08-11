@@ -1,7 +1,6 @@
 suite: "Verify Otel Configurations"
 templates:
   - templates/controller/deployment.yaml
-  - templates/cniwatcher/daemonset.yaml
 chart:
   version: 1.0.0
   appVersion: 2.0.0

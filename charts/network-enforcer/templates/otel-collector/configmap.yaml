@@ -19,7 +19,7 @@ data:
       count:
         logs:
           network_enforcer_policy_denies:
-            description: "Total network policy deny events observed by cniwatcher"
+            description: "Total network policy deny events observed"
             conditions:
               - 'attributes["cni.type"] != nil'
             attributes:

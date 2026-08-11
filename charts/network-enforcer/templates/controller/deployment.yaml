@@ -31,7 +31,6 @@ spec:
       containers:
       - args:
         {{- toYaml .Values.controller.args | nindent 8 }}
-        - --drain-flows-interval={{ .Values.controller.drainFlowsInterval }}
         - --wnp-status-reconciler-update-interval={{ .Values.controller.wnpStatusUpdateInterval }}
         command:
         - /controller

@@ -1,5 +1,0 @@
-FROM alpine
-WORKDIR /
-COPY ./bin/cniwatcher /cniwatcher
-
-ENTRYPOINT ["/cniwatcher"]

@@ -9,7 +9,7 @@ jobs:
   build:
     strategy:
       matrix:
-        component: [controller, cniwatcher]
+        component: [controller]
         arch: [amd64, arm64]
         include:
           - arch: amd64
@@ -44,7 +44,7 @@ jobs:
       id-token: write
     strategy:
       matrix:
-        component: [controller, cniwatcher]
+        component: [controller]
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,7 +63,7 @@ jobs:
     name: Sign attestations and upload as artifacts
     strategy:
       matrix:
-        component: [controller, cniwatcher]
+        component: [controller]
         arch: [amd64, arm64]
     needs: [merge]
     permissions:
@@ -134,14 +134,6 @@ jobs:
                 'NetworkEnforcer-controller-attestation-arm64-provenance.intoto.jsonl.bundle.sigstore',
                 'NetworkEnforcer-controller-attestation-arm64-sbom.json',
                 'NetworkEnforcer-controller-attestation-arm64-sbom.json.bundle.sigstore',
-                'NetworkEnforcer-cniwatcher-attestation-amd64-provenance.intoto.jsonl',
-                'NetworkEnforcer-cniwatcher-attestation-amd64-provenance.intoto.jsonl.bundle.sigstore',
-                'NetworkEnforcer-cniwatcher-attestation-amd64-sbom.json',
-                'NetworkEnforcer-cniwatcher-attestation-amd64-sbom.json.bundle.sigstore',
-                'NetworkEnforcer-cniwatcher-attestation-arm64-provenance.intoto.jsonl',
-                'NetworkEnforcer-cniwatcher-attestation-arm64-provenance.intoto.jsonl.bundle.sigstore',
-                'NetworkEnforcer-cniwatcher-attestation-arm64-sbom.json',
-                'NetworkEnforcer-cniwatcher-attestation-arm64-sbom.json.bundle.sigstore',
                 ]
             const {RELEASE_ID} = process.env
             for (const file of files) {

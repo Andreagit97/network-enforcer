@@ -54,7 +54,7 @@ build-$(1)-image:
 E2E_DEPS += build-$(1)-image
 endef
 
-TARGET=controller cniwatcher
+TARGET=controller
 $(foreach T,$(TARGET),$(eval $(call BUILD_template,$(T))))
 
 .PHONY: manifests
@@ -68,12 +68,6 @@ manifests: controller-gen ## Generate CRDs and RBAC.
 	# Inject Helm labels after the name line
 	sed -i '/^  name:/a\  labels:\n  {{- include "network-enforcer.labels" . | nindent 4 }}' \
 		charts/network-enforcer/templates/controller/role.yaml
-	"$(CONTROLLER_GEN)" rbac:roleName=cniwatcher-role paths="./internal/cniwatcher" \
-		output:rbac:artifacts:config=charts/network-enforcer/templates/cniwatcher
-	sed -i 's/cniwatcher-role/{{ include "network-enforcer.fullname" . }}-cniwatcher/' \
-		charts/network-enforcer/templates/cniwatcher/role.yaml
-	sed -i '/^  name:/a\  labels:\n  {{- include "network-enforcer.labels" . | nindent 4 }}' \
-		charts/network-enforcer/templates/cniwatcher/role.yaml
 
 .PHONY: generate
 generate: manifests controller-gen generate-chart-values ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -114,10 +108,6 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 .PHONY: controller
 controller: fmt ## Build controller binary.
 	CGO_ENABLED=0 GOOS=linux go build -o bin/controller ./cmd/controller
-
-.PHONY: cniwatcher
-cniwatcher: fmt ## Build cniwatcher binary.
-	CGO_ENABLED=0 GOOS=linux go build -o bin/cniwatcher ./cmd/cniwatcher
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
@@ -250,23 +240,6 @@ define gomodver
 $(shell go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' $(1) 2>/dev/null)
 endef
 
-##@ cniWatcher
-
-GOLDMANE_VERSION ?= v3.30.2
-.PHONY: download-calico-goldmane-proto
-download-calico-goldmane-proto: ## Download Calico Goldmane proto file.
-	@echo "Downloading Goldmane proto file..."
-	mkdir -p internal/cniwatcher/calico/goldmane
-	curl -fsSL https://raw.githubusercontent.com/projectcalico/calico/$(GOLDMANE_VERSION)/goldmane/proto/api.proto -o internal/cniwatcher/calico/goldmane/api.proto
-
-.PHONY: generate-calico-goldmane-proto
-generate-calico-goldmane-proto: download-calico-goldmane-proto ## Generate Go code from Goldmane proto definitions.
-	@echo "Generating Go code from Goldmane proto definitions..."
-	protoc --go_out=. --go_opt=paths=source_relative \
-		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
-		internal/cniwatcher/calico/goldmane/api.proto
-
-
 # Use `E2E_CNI` env variable to change CNI
 # Example: `make test-e2e E2E_CNI=cilium`
 # If E2E_CNI is not specified the default is `cilium`
@@ -279,12 +252,9 @@ generate-calico-goldmane-proto: download-calico-goldmane-proto ## Generate Go co
 test-e2e:
 ifneq ($(E2E_USE_EXISTING_CLUSTER),true)
 ifeq ($(E2E_NO_REBUILD),)
-	$(MAKE) build-controller-image build-cniwatcher-image
+	$(MAKE) build-controller-image
 endif
 endif
-	@echo "🧪 Building chart dependencies..."
-	helm repo add --force-update open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
-	helm dependency build charts/network-enforcer
 	@echo "🧪 Running e2e tests with '$(E2E_CNI)' CNI..."
 	E2E_USE_EXISTING_CLUSTER=$(E2E_USE_EXISTING_CLUSTER) E2E_DEPENDENCIES=$(E2E_DEPENDENCIES) go test -v ./test/e2e/... -count=1
 
