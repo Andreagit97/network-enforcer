@@ -67,7 +67,7 @@ func (r *LearningReconciler) updateProposal(
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, proposal, func() error {
 		// Recompute the selector only when creating the resource the first time.
 		if len(proposal.Spec.PolicyTypes) == 0 {
-			workloadSelector, err := selectorFromWorkloadKey(ctx, r.Client, workload)
+			workloadSelector, err := lookupPodSelectorForWorkload(ctx, r.Client, workload)
 			if err != nil {
 				return fmt.Errorf("resolving workload selector: %w", err)
 			}
