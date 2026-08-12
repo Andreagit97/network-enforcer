@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
+	"github.com/rancher-sandbox/network-enforcer/internal/ownerkind"
+	"github.com/rancher-sandbox/network-enforcer/internal/topology"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	networkingv1 "k8s.io/api/networking/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -33,6 +33,11 @@ type LearningReconciler struct {
 	Scheme    *runtime.Scheme
 	eventChan chan event.TypedGenericEvent[types.LearningEvent]
 }
+
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets;daemonsets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=security.rancher.io,resources=workloadnetworkpolicyproposals,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=security.rancher.io,resources=workloadnetworkpolicies,verbs=get;list;watch
 
 func NewLearningReconciler(
 	client client.Client,
@@ -61,15 +66,23 @@ func (r *LearningReconciler) enqueueEvent(evt types.LearningEvent) bool {
 
 func (r *LearningReconciler) updateProposal(
 	ctx context.Context,
-	proposalName, proposalNamespace string,
+	workload topology.WorkloadKey,
 ) error {
-	proposal := &securityv1alpha1.WorkloadNetworkPolicyProposal{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      proposalName,
-			Namespace: proposalNamespace,
-		},
-	}
+	// Istio Ambient L4 authorization is enforced on the receiving side,
+	// so learning always targets the ingress proposal.
+	proposal := getProposalMetadata(workload, networkingv1.PolicyTypeIngress)
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, proposal, func() error {
+		// Populate the Istio backend only when creating the resource the first time.
+		if proposal.Spec.Istio == nil {
+			workloadSelector, err := lookupPodSelectorForWorkload(ctx, r.Client, workload)
+			if err != nil {
+				return fmt.Errorf("resolving workload selector: %w", err)
+			}
+			proposal.Spec.Backend = securityv1alpha1.PolicyBackendIstio
+			proposal.Spec.Istio = &securityv1alpha1.IstioAuthorizationPolicySpec{
+				Selector: workloadSelector,
+			}
+		}
 		// todo!: implement the proposal population
 		return nil
 	}); err != nil {
@@ -81,18 +94,24 @@ func (r *LearningReconciler) updateProposal(
 func (r *LearningReconciler) processIstioLearningEvent(ctx context.Context, req types.LearningEvent) error {
 	// For istio proposals are inbound, so we always need to search for inbound proposal for
 	// the destination.
-	// todo!: for now we use the name of the pod not the workload. we need to change this in the future.
-	proposalName := req.DstName + "-" + strings.ToLower(string(networkingv1.PolicyTypeIngress))
-
-	policies, err := checkExistingPolicy(ctx, r.Client, req.DstNamespace, proposalName)
+	workload, err := workloadKeyFromPod(ctx, r.Client, req.DstNamespace, req.DstName)
 	if err != nil {
-		return fmt.Errorf("checking existing policies for %s/%s: %w", req.DstNamespace, proposalName, err)
+		return fmt.Errorf("resolving destination workload for %s/%s: %w", req.DstNamespace, req.DstName, err)
+	}
+	if _, ok := ownerkind.IsValidEndpoint(string(workload.OwnerKind)); !ok {
+		return nil
+	}
+
+	proposalName := getProposalName(workload, networkingv1.PolicyTypeIngress)
+	policies, err := checkExistingPolicy(ctx, r.Client, workload.Namespace, proposalName)
+	if err != nil {
+		return fmt.Errorf("checking existing policies for %s/%s: %w", workload.Namespace, proposalName, err)
 	}
 
 	switch len(policies) {
 	case 0:
 		// no policy associated with the proposal
-		return r.updateProposal(ctx, proposalName, req.DstNamespace)
+		return r.updateProposal(ctx, workload)
 	case 1:
 		// we do nothing, we already have a policy
 		return nil
