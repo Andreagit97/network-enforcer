@@ -162,8 +162,6 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 				require.Len(t, result, 1)
 				require.Contains(t, result, wnpKey)
 				require.Len(t, result[wnpKey], 1)
-				require.Equal(t, networkingv1.PolicyTypeEgress, result[wnpKey][0].Direction)
-				require.Equal(t, "node-1", result[wnpKey][0].NodeName)
 				require.Equal(t, "ns1", result[wnpKey][0].DenyingPolicyNamespace)
 				require.Equal(t, "policy-1", result[wnpKey][0].DenyingPolicyName)
 			},
@@ -188,7 +186,6 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 				require.Len(t, result, 1)
 				require.Contains(t, result, wnpKey)
 				require.Len(t, result[wnpKey], 1)
-				require.Equal(t, networkingv1.PolicyTypeIngress, result[wnpKey][0].Direction)
 			},
 		},
 		{
@@ -340,20 +337,20 @@ func TestProcessWorkloadNetworkPolicy_TwoPhasePatch(t *testing.T) {
 
 	violations := []securityv1alpha1.ViolationRecord{
 		{
-			Timestamp: metav1.NewTime(now.Add(-10 * time.Minute)),
-			NodeName:  "node-1",
-			Direction: networkingv1.PolicyTypeEgress,
-			Source: securityv1alpha1.WorkloadRef{
-				Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
+			ViolationInfo: securityv1alpha1.ViolationInfo{
+				Timestamp: metav1.NewTime(now.Add(-10 * time.Minute)),
+				Source: securityv1alpha1.WorkloadRef{
+					Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
+				},
+				Dest: securityv1alpha1.WorkloadRef{
+					Namespace: "dst-ns", OwnerKind: "Service", OwnerName: "svc",
+				},
+				Protocol:               corev1.ProtocolTCP,
+				DstPort:                80,
+				Action:                 "protect",
+				DenyingPolicyNamespace: "ns1",
+				DenyingPolicyName:      "policy-1",
 			},
-			Dest: securityv1alpha1.WorkloadRef{
-				Namespace: "dst-ns", OwnerKind: "Service", OwnerName: "svc",
-			},
-			Protocol:               corev1.ProtocolTCP,
-			DstPort:                80,
-			Action:                 "protect",
-			DenyingPolicyNamespace: "ns1",
-			DenyingPolicyName:      "policy-1",
 		},
 	}
 
@@ -424,8 +421,6 @@ func TestConvertProtoViolation(t *testing.T) {
 
 	rec := convertProtoViolation(pbViolation)
 
-	require.Equal(t, networkingv1.PolicyTypeEgress, rec.Direction)
-	require.Equal(t, "node-1", rec.NodeName)
 	require.Equal(t, "src-ns", rec.Source.Namespace)
 	require.Equal(t, "Deployment", rec.Source.OwnerKind)
 	require.Equal(t, "src-app", rec.Source.OwnerName)
@@ -597,21 +592,21 @@ func TestSyncClearsViolationsWithNoNewScrapedViolations(t *testing.T) {
 		ActiveViolationCount: 1,
 		Violations: []securityv1alpha1.ViolationRecord{
 			{
-				ID:        0,
-				Timestamp: metav1.NewTime(now.Add(-10 * time.Minute)),
-				NodeName:  "node-1",
-				Direction: networkingv1.PolicyTypeEgress,
-				Source: securityv1alpha1.WorkloadRef{
-					Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
+				ID: 0,
+				ViolationInfo: securityv1alpha1.ViolationInfo{
+					Timestamp: metav1.NewTime(now.Add(-10 * time.Minute)),
+					Source: securityv1alpha1.WorkloadRef{
+						Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
+					},
+					Dest: securityv1alpha1.WorkloadRef{
+						Namespace: "dst-ns", OwnerKind: "Service", OwnerName: "svc",
+					},
+					Protocol:               corev1.ProtocolTCP,
+					DstPort:                80,
+					Action:                 "protect",
+					DenyingPolicyNamespace: "ns1",
+					DenyingPolicyName:      "policy-1",
 				},
-				Dest: securityv1alpha1.WorkloadRef{
-					Namespace: "dst-ns", OwnerKind: "Service", OwnerName: "svc",
-				},
-				Protocol:               corev1.ProtocolTCP,
-				DstPort:                80,
-				Action:                 "protect",
-				DenyingPolicyNamespace: "ns1",
-				DenyingPolicyName:      "policy-1",
 			},
 		},
 	}
@@ -676,20 +671,20 @@ func TestTwoPhasePatchConflict(t *testing.T) {
 
 	violations := []securityv1alpha1.ViolationRecord{
 		{
-			Timestamp: metav1.NewTime(time.Now()),
-			NodeName:  "node-1",
-			Direction: networkingv1.PolicyTypeEgress,
-			Source: securityv1alpha1.WorkloadRef{
-				Namespace: "ns1", OwnerKind: "Deployment", OwnerName: "app",
+			ViolationInfo: securityv1alpha1.ViolationInfo{
+				Timestamp: metav1.NewTime(time.Now()),
+				Source: securityv1alpha1.WorkloadRef{
+					Namespace: "ns1", OwnerKind: "Deployment", OwnerName: "app",
+				},
+				Dest: securityv1alpha1.WorkloadRef{
+					Namespace: "ns2", OwnerKind: "Service", OwnerName: "svc",
+				},
+				Protocol:               corev1.ProtocolTCP,
+				DstPort:                80,
+				Action:                 "protect",
+				DenyingPolicyNamespace: "ns1",
+				DenyingPolicyName:      "conflict-policy",
 			},
-			Dest: securityv1alpha1.WorkloadRef{
-				Namespace: "ns2", OwnerKind: "Service", OwnerName: "svc",
-			},
-			Protocol:               corev1.ProtocolTCP,
-			DstPort:                80,
-			Action:                 "protect",
-			DenyingPolicyNamespace: "ns1",
-			DenyingPolicyName:      "conflict-policy",
 		},
 	}
 

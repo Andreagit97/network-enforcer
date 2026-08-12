@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
@@ -138,7 +139,10 @@ func (s *IstioScraper) Export(
 					DstName:      attrs[dstNameKey],
 					DstNamespace: attrs[dstNamespaceKey],
 					DstPort:      attrs[dstPortKey],
-					SrcIdentity:  attrs[srcIdentityKey],
+					// Strip the `spiffe://` scheme as soon as we ingest the
+					// identity: the canonical principal form (Istio convention and
+					// our stored WorkloadRef.Identity) carries no prefix.
+					SrcIdentity: strings.TrimPrefix(attrs[srcIdentityKey], "spiffe://"),
 				}) {
 					// todo!: we can consider some rate limiting here
 					s.Logger.WarnContext(ctx, "Failed to enqueue learning event, channel is full")

@@ -19,13 +19,14 @@ type annotationInfo struct {
 
 // ViolationRecordKey is the dedup key for recognising the same logical violation across scrapes.
 type ViolationRecordKey struct {
-	Direction              networkingv1.PolicyType
 	SrcNamespace           string
 	SrcOwnerKind           string
 	SrcOwnerName           string
+	SrcIdentity            string
 	DstNamespace           string
 	DstOwnerKind           string
 	DstOwnerName           string
+	DstIdentity            string
 	Protocol               string
 	DstPort                int32
 	Action                 WorkloadNetworkPolicyMode
@@ -36,13 +37,14 @@ type ViolationRecordKey struct {
 // Key returns the dedup key for a ViolationRecord.
 func (v ViolationRecord) Key() ViolationRecordKey {
 	return ViolationRecordKey{
-		Direction:              v.Direction,
 		SrcNamespace:           v.Source.Namespace,
 		SrcOwnerKind:           v.Source.OwnerKind,
 		SrcOwnerName:           v.Source.OwnerName,
+		SrcIdentity:            v.Source.Identity,
 		DstNamespace:           v.Dest.Namespace,
 		DstOwnerKind:           v.Dest.OwnerKind,
 		DstOwnerName:           v.Dest.OwnerName,
+		DstIdentity:            v.Dest.Identity,
 		Protocol:               string(v.Protocol),
 		DstPort:                v.DstPort,
 		Action:                 v.Action,
@@ -51,32 +53,120 @@ func (v ViolationRecord) Key() ViolationRecordKey {
 	}
 }
 
-// clearAllowedViolations drops violations whose flow matches a policyTemplate
-// rule via exact structural comparison (EgressRuleEqual / IngressRuleEqual).
+// clearAllowedViolations drops violations whose flow is now permitted by the
+// policy template. It dispatches on the backend: the kubernetes backend keeps
+// the NetworkPolicy-based structural comparison (EgressRuleEqual /
+// IngressRuleEqual), while the istio backend matches against Spec.Istio.Rules.
 func (wnp *WorkloadNetworkPolicy) clearAllowedViolations() {
-	if !wnp.Spec.IsKubernetesBackend() {
-		// todo!: for now we clear the violations only if the backend is k8s
-		return
+	switch wnp.Spec.Backend {
+	case PolicyBackendKubernetes:
+		wnp.clearAllowedKubernetesViolations()
+	case PolicyBackendIstio:
+		wnp.clearAllowedIstioViolations()
 	}
+}
 
+// clearAllowedKubernetesViolations drops violations whose flow matches a
+// kubernetes policy template rule via exact structural comparison
+// (EgressRuleEqual / IngressRuleEqual).
+func (wnp *WorkloadNetworkPolicy) clearAllowedKubernetesViolations() {
 	policyTemplate := wnp.Spec.Kubernetes
 	wnp.Status.Violations = slices.DeleteFunc(wnp.Status.Violations, func(v ViolationRecord) bool {
-		switch v.Direction {
-		case networkingv1.PolicyTypeEgress:
-			for _, rule := range policyTemplate.Egress {
-				if EgressRuleEqual(v.ToEgressRule(), rule) {
-					return true
-				}
+		for _, rule := range policyTemplate.Ingress {
+			if IngressRuleEqual(v.ToIngressRule(), rule) {
+				return true
 			}
-		case networkingv1.PolicyTypeIngress:
-			for _, rule := range policyTemplate.Ingress {
-				if IngressRuleEqual(v.ToIngressRule(), rule) {
-					return true
-				}
+		}
+		for _, rule := range policyTemplate.Egress {
+			if EgressRuleEqual(v.ToEgressRule(), rule) {
+				return true
 			}
 		}
 		return false
 	})
+}
+
+func (wnp *WorkloadNetworkPolicy) clearAllowedIstioViolations() {
+	if wnp.Spec.Istio == nil {
+		return
+	}
+
+	wnp.Status.Violations = slices.DeleteFunc(wnp.Status.Violations, func(v ViolationRecord) bool {
+		for _, rule := range wnp.Spec.Istio.Rules {
+			if istioRuleAllowsSource(rule, v.Source) && istioRuleAllowsPort(rule, v.DstPort) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// istioRuleAllowsSource reports whether the rule allows the violation source.
+// Istio principals are workload identities (SPIFFE service accounts), so the
+// match is exact on the source identity: matching on the namespace alone would
+// clear violations from a denied principal just because another principal in
+// the same namespace is allowed. Both sides use the canonical, prefix-free
+// Istio principal form (`cluster.local/ns/<ns>/sa/<sa>`, `*` for any source):
+// the backend strips the `spiffe://` scheme at ingestion. When the source
+// identity is unknown (e.g. it was not reported by the backend), only rules
+// without a principal constraint (no `From`, no `Principals`, or `*`) can
+// allow the source: we prefer keeping a violation over silently clearing one.
+func istioRuleAllowsSource(rule IstioAuthorizationPolicyRule, src WorkloadRef) bool {
+	if len(rule.From) == 0 {
+		return true
+	}
+	for _, from := range rule.From {
+		if len(from.Source.Principals) == 0 {
+			return true
+		}
+		for _, principal := range from.Source.Principals {
+			if principal == "*" || principal == src.Identity {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func istioRuleAllowsPort(rule IstioAuthorizationPolicyRule, dstPort int32) bool {
+	if len(rule.To) == 0 {
+		return true
+	}
+	for _, to := range rule.To {
+		if len(to.Operation.Ports) == 0 {
+			return true
+		}
+		for _, port := range to.Operation.Ports {
+			if istioPortMatches(port, dstPort) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func istioPortMatches(portSpec string, dstPort int32) bool {
+	lo, hi, ok := parseIstioPortRange(portSpec)
+	if !ok {
+		return false
+	}
+	return dstPort >= lo && dstPort <= hi
+}
+
+func parseIstioPortRange(portSpec string) (int32, int32, bool) {
+	loStr, hiStr, _ := strings.Cut(portSpec, "-")
+	lo, err := strconv.ParseInt(loStr, 10, 32)
+	if err != nil {
+		return 0, 0, false
+	}
+	if hiStr == "" {
+		return int32(lo), int32(lo), true
+	}
+	hi, err := strconv.ParseInt(hiStr, 10, 32)
+	if err != nil {
+		return 0, 0, false
+	}
+	return int32(lo), int32(hi), true
 }
 
 // ToEgressRule builds an egress rule from the violation for comparison.

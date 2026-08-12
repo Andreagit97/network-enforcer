@@ -64,6 +64,9 @@ spec:
                 - kubernetes
                 - istio
                 type: string
+                x-kubernetes-validations:
+                - message: backend is immutable
+                  rule: self == oldSelf
               istio:
                 description: |-
                   Istio contains a constrained L4 policy model rendered as an Istio
@@ -695,6 +698,11 @@ spec:
                         dest:
                           description: Dest is the workload that received the traffic.
                           properties:
+                            identity:
+                              description: |-
+                                Identity is the provider-specific workload identity: SPIFFE for Istio,
+                                numeric security ID for Cilium, empty for Calico.
+                              type: string
                             namespace:
                               description: Namespace is the Kubernetes namespace of
                                 the workload.
@@ -708,9 +716,6 @@ spec:
                               description: OwnerName is the name of the owner resource.
                               type: string
                           type: object
-                        direction:
-                          description: Direction is the traffic direction.
-                          type: string
                         dstPort:
                           description: DstPort is the destination port. 0 when unavailable.
                           format: int32
@@ -730,16 +735,17 @@ spec:
                             negative, so the sign bit is never set in practice.
                           format: int64
                           type: integer
-                        nodeName:
-                          description: NodeName is the node whose cniwatcher reported
-                            the violation.
-                          type: string
                         protocol:
                           description: Protocol is the L4 protocol (TCP, UDP).
                           type: string
                         source:
                           description: Source is the workload that initiated the traffic.
                           properties:
+                            identity:
+                              description: |-
+                                Identity is the provider-specific workload identity: SPIFFE for Istio,
+                                numeric security ID for Cilium, empty for Calico.
+                              type: string
                             namespace:
                               description: Namespace is the Kubernetes namespace of
                                 the workload.
@@ -759,9 +765,7 @@ spec:
                           type: string
                       required:
                       - action
-                      - direction
                       - id
-                      - nodeName
                       - protocol
                       - timestamp
                       type: object
@@ -801,8 +805,11 @@ spec:
                   (max maxViolationRecords). Oldest entries are dropped when the
                   limit is reached.
                 items:
-                  description: ViolationRecord holds the details of a single network
-                    policy violation.
+                  description: |-
+                    ViolationRecord holds the details of a single network policy violation.
+                    It embeds ViolationInfo (the violation without the ID) so that the two
+                    types cannot drift apart: every violation field is defined once, in
+                    ViolationInfo.
                   properties:
                     action:
                       description: Action is the enforcement action taken (monitor
@@ -823,6 +830,11 @@ spec:
                     dest:
                       description: Dest is the workload that received the traffic.
                       properties:
+                        identity:
+                          description: |-
+                            Identity is the provider-specific workload identity: SPIFFE for Istio,
+                            numeric security ID for Cilium, empty for Calico.
+                          type: string
                         namespace:
                           description: Namespace is the Kubernetes namespace of the
                             workload.
@@ -836,9 +848,6 @@ spec:
                           description: OwnerName is the name of the owner resource.
                           type: string
                       type: object
-                    direction:
-                      description: Direction is the traffic direction.
-                      type: string
                     dstPort:
                       description: DstPort is the destination port. 0 when unavailable.
                       format: int32
@@ -858,16 +867,17 @@ spec:
                         negative, so the sign bit is never set in practice.
                       format: int64
                       type: integer
-                    nodeName:
-                      description: NodeName is the node whose cniwatcher reported
-                        the violation.
-                      type: string
                     protocol:
                       description: Protocol is the L4 protocol (TCP, UDP).
                       type: string
                     source:
                       description: Source is the workload that initiated the traffic.
                       properties:
+                        identity:
+                          description: |-
+                            Identity is the provider-specific workload identity: SPIFFE for Istio,
+                            numeric security ID for Cilium, empty for Calico.
+                          type: string
                         namespace:
                           description: Namespace is the Kubernetes namespace of the
                             workload.
@@ -887,9 +897,7 @@ spec:
                       type: string
                   required:
                   - action
-                  - direction
                   - id
-                  - nodeName
                   - protocol
                   - timestamp
                   type: object

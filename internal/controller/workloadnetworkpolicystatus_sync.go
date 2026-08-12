@@ -281,16 +281,16 @@ func convertProtoViolation(v *agentv1.ViolationRecord) securityv1alpha1.Violatio
 	}
 
 	return securityv1alpha1.ViolationRecord{
-		Timestamp:              metav1.NewTime(v.GetTimestamp().AsTime()),
-		NodeName:               v.GetNodeName(),
-		Direction:              networkingv1.PolicyType(v.GetDirection()),
-		Source:                 source,
-		Dest:                   dest,
-		Protocol:               corev1.Protocol(v.GetProtocol()),
-		DstPort:                v.GetDstPort(),
-		Action:                 securityv1alpha1.WorkloadNetworkPolicyMode(v.GetAction()),
-		DenyingPolicyNamespace: v.GetDenyingPolicyNamespace(),
-		DenyingPolicyName:      v.GetDenyingPolicyName(),
+		ViolationInfo: securityv1alpha1.ViolationInfo{
+			Timestamp:              metav1.NewTime(v.GetTimestamp().AsTime()),
+			Source:                 source,
+			Dest:                   dest,
+			Protocol:               corev1.Protocol(v.GetProtocol()),
+			DstPort:                v.GetDstPort(),
+			Action:                 securityv1alpha1.WorkloadNetworkPolicyMode(v.GetAction()),
+			DenyingPolicyNamespace: v.GetDenyingPolicyNamespace(),
+			DenyingPolicyName:      v.GetDenyingPolicyName(),
+		},
 	}
 }
 
@@ -369,7 +369,6 @@ func (r *WorkloadNetworkPolicyStatusSync) emitAcknowledgedViolationOtelLog(
 		otellog.Int64("id", violation.ID),
 		otellog.String("timestamp", violation.Timestamp.UTC().Format(time.RFC3339)),
 		otellog.String("reason", ack.Reason),
-		otellog.String("direction", string(violation.Direction)),
 		otellog.String("source.namespace", violation.Source.Namespace),
 		otellog.String("source.workload.kind", violation.Source.OwnerKind),
 		otellog.String("source.workload.name", violation.Source.OwnerName),
@@ -379,7 +378,6 @@ func (r *WorkloadNetworkPolicyStatusSync) emitAcknowledgedViolationOtelLog(
 		otellog.String("protocol", string(violation.Protocol)),
 		otellog.Int64("dstPort", int64(violation.DstPort)),
 		otellog.String("action", string(violation.Action)),
-		otellog.String("node.name", violation.NodeName),
 		otellog.String("denyingPolicy.namespace", violation.DenyingPolicyNamespace),
 		otellog.String("denyingPolicy.name", violation.DenyingPolicyName),
 	)
