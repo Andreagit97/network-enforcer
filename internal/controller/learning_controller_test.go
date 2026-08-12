@@ -143,12 +143,9 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 			}
 
 			require.Equal(t, tt.wantProposalName, proposals.Items[0].Name)
-			require.Equal(t, tt.wantSelector, proposals.Items[0].Spec.PodSelector.MatchLabels)
-			require.Equal(
-				t,
-				[]networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
-				proposals.Items[0].Spec.PolicyTypes,
-			)
+			require.Equal(t, securityv1alpha1.PolicyBackendIstio, proposals.Items[0].Spec.Backend)
+			require.NotNil(t, proposals.Items[0].Spec.Istio)
+			require.Equal(t, tt.wantSelector, proposals.Items[0].Spec.Istio.Selector.MatchLabels)
 		})
 	}
 }

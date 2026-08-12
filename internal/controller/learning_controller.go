@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/ownerkind"
 	"github.com/rancher-sandbox/network-enforcer/internal/topology"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
@@ -71,14 +72,16 @@ func (r *LearningReconciler) updateProposal(
 	// so learning always targets the ingress proposal.
 	proposal := getProposalMetadata(workload, networkingv1.PolicyTypeIngress)
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, proposal, func() error {
-		// Recompute the selector only when creating the resource the first time.
-		if len(proposal.Spec.PolicyTypes) == 0 {
+		// Populate the Istio backend only when creating the resource the first time.
+		if proposal.Spec.Istio == nil {
 			workloadSelector, err := lookupPodSelectorForWorkload(ctx, r.Client, workload)
 			if err != nil {
 				return fmt.Errorf("resolving workload selector: %w", err)
 			}
-			proposal.Spec.PodSelector = workloadSelector
-			proposal.Spec.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
+			proposal.Spec.Backend = securityv1alpha1.PolicyBackendIstio
+			proposal.Spec.Istio = &securityv1alpha1.IstioAuthorizationPolicySpec{
+				Selector: workloadSelector,
+			}
 		}
 		// todo!: implement the proposal population
 		return nil

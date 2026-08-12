@@ -7,10 +7,12 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/ownerkind"
 	"github.com/rancher-sandbox/network-enforcer/internal/topology"
 )
@@ -67,6 +69,27 @@ func extractWorkloadKey(pod *corev1.Pod) topology.WorkloadKey {
 		Namespace: namespace,
 		OwnerKind: ownerkind.Kind(kind),
 		OwnerName: name,
+	}
+}
+
+func getProposalName(workload topology.WorkloadKey, direction networkingv1.PolicyType) string {
+	return fmt.Sprintf(
+		"%s-%s-%s",
+		strings.ToLower(string(workload.OwnerKind)),
+		workload.OwnerName,
+		strings.ToLower(string(direction)),
+	)
+}
+
+func getProposalMetadata(
+	workload topology.WorkloadKey,
+	direction networkingv1.PolicyType,
+) *securityv1alpha1.WorkloadNetworkPolicyProposal {
+	return &securityv1alpha1.WorkloadNetworkPolicyProposal{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      getProposalName(workload, direction),
+			Namespace: workload.Namespace,
+		},
 	}
 }
 
