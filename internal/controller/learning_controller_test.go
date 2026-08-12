@@ -20,8 +20,8 @@ import (
 func TestProcessIstioLearningEvent(t *testing.T) {
 	t.Parallel()
 
-	rsOwner := func(name string) metav1.OwnerReference {
-		return metav1.OwnerReference{
+	rsOwner := func(name string) *metav1.OwnerReference {
+		return &metav1.OwnerReference{
 			APIVersion: "apps/v1",
 			Kind:       string(ownerkind.KindReplicaSet),
 			Name:       name,
@@ -103,7 +103,7 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 		{
 			name: "unsupported owner skipped",
 			objs: []client.Object{
-				ownedPod("oneshot-pod", metav1.OwnerReference{
+				ownedPod("oneshot-pod", &metav1.OwnerReference{
 					APIVersion: "batch/v1",
 					Kind:       "Job",
 					Name:       "oneshot",

@@ -7,6 +7,7 @@ const (
 	KindStatefulSet Kind = "StatefulSet"
 	KindDaemonSet   Kind = "DaemonSet"
 	KindReplicaSet  Kind = "ReplicaSet"
+	KindPod         Kind = "Pod"
 	KindService     Kind = "Service"
 	KindCronJob     Kind = "CronJob"
 )

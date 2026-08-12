@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -16,14 +15,9 @@ import (
 	"github.com/rancher-sandbox/network-enforcer/internal/topology"
 )
 
-// errUnsupportedWorkloadKind is returned when a pod's controlling owner is not
-// a supported workload kind (Deployment, StatefulSet, DaemonSet).
-var errUnsupportedWorkloadKind = errors.New("unsupported workload kind")
-
-// workloadKeyFromPod resolves a Pod to its owning workload from the pod's
-// controller OwnerReference. Deployment pods are owned by a ReplicaSet; we
-// infer the Deployment name from the pod-template-hash label.
-// StatefulSet and DaemonSet own pods directly.
+// workloadKeyFromPod fetches the Pod and resolves it to a WorkloadKey.
+// Callers should use ownerkind.IsValidEndpoint to decide whether the result is
+// supported.
 func workloadKeyFromPod(
 	ctx context.Context,
 	c client.Client,
@@ -33,32 +27,47 @@ func workloadKeyFromPod(
 	if err := c.Get(ctx, types.NamespacedName{Name: podName, Namespace: namespace}, &pod); err != nil {
 		return topology.WorkloadKey{}, fmt.Errorf("getting Pod %s/%s: %w", namespace, podName, err)
 	}
+	return extractWorkloadKey(&pod), nil
+}
 
-	ref := metav1.GetControllerOf(&pod)
+// extractWorkloadKey resolves a Pod to its owning workload from controller
+// OwnerReferences. Deployment pods are owned by a ReplicaSet; we infer the
+// Deployment name from the pod-template-hash label. StatefulSet and DaemonSet
+// own pods directly.
+//
+// Heuristics for additional kinds (Job/CronJob, OpenShift DeploymentConfig)
+// live in runtime-enforcer's former getPodInfo and can be ported when needed:
+// https://github.com/rancher-sandbox/runtime-enforcer/pull/219/changes#diff-65f18bba13a51ac9c01c9f32f9c222070bb8f3dda11868f44c75889265381f5fL45
+func extractWorkloadKey(pod *corev1.Pod) topology.WorkloadKey {
+	namespace := pod.Namespace
+	ref := metav1.GetControllerOf(pod)
 	if ref == nil {
-		return topology.WorkloadKey{}, fmt.Errorf("pod %s/%s has no controller owner", namespace, podName)
+		return topology.WorkloadKey{
+			Namespace: namespace,
+			OwnerKind: ownerkind.KindPod,
+			OwnerName: pod.Name,
+		}
 	}
 
 	kind, name := ref.Kind, ref.Name
 	if kind == string(ownerkind.KindReplicaSet) {
 		hash := pod.Labels[appsv1.DefaultDeploymentUniqueLabelKey]
 		if hash == "" || !strings.HasSuffix(name, hash) {
-			return topology.WorkloadKey{}, fmt.Errorf("%w: %s", errUnsupportedWorkloadKind, ownerkind.KindReplicaSet)
+			return topology.WorkloadKey{
+				Namespace: namespace,
+				OwnerKind: ownerkind.KindReplicaSet,
+				OwnerName: name,
+			}
 		}
 		kind = string(ownerkind.KindDeployment)
 		name = strings.TrimSuffix(name, "-"+hash)
 	}
 
-	ownerKind, ok := ownerkind.IsValidEndpoint(kind)
-	if !ok {
-		return topology.WorkloadKey{}, fmt.Errorf("%w: %s", errUnsupportedWorkloadKind, kind)
-	}
-
 	return topology.WorkloadKey{
 		Namespace: namespace,
-		OwnerKind: ownerKind,
+		OwnerKind: ownerkind.Kind(kind),
 		OwnerName: name,
-	}, nil
+	}
 }
 
 func lookupPodSelectorForWorkload(

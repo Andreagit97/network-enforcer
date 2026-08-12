@@ -134,9 +134,19 @@ func (s *IstioScraper) Export(
 					// todo!: we need to handle other events, monitor/protect
 					continue
 				}
+				dstName := attrs[dstNameKey]
+				dstNamespace := attrs[dstNamespaceKey]
+				if dstName == "" || dstNamespace == "" {
+					s.Logger.WarnContext(ctx, "Skipping learning event with missing destination identity",
+						dstNameKey, dstName,
+						dstNamespaceKey, dstNamespace,
+						"attrs", attrs,
+					)
+					continue
+				}
 				if !s.EnqueueLearningEvent(types.LearningEvent{
-					DstName:      attrs[dstNameKey],
-					DstNamespace: attrs[dstNamespaceKey],
+					DstName:      dstName,
+					DstNamespace: dstNamespace,
 					DstPort:      attrs[dstPortKey],
 					SrcIdentity:  attrs[srcIdentityKey],
 				}) {

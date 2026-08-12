@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/rancher-sandbox/network-enforcer/internal/ownerkind"
 	"github.com/rancher-sandbox/network-enforcer/internal/topology"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -31,6 +32,11 @@ type LearningReconciler struct {
 	Scheme    *runtime.Scheme
 	eventChan chan event.TypedGenericEvent[types.LearningEvent]
 }
+
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets;daemonsets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=security.rancher.io,resources=workloadnetworkpolicyproposals,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=security.rancher.io,resources=workloadnetworkpolicies,verbs=get;list;watch
 
 func NewLearningReconciler(
 	client client.Client,
@@ -85,16 +91,12 @@ func (r *LearningReconciler) updateProposal(
 func (r *LearningReconciler) processIstioLearningEvent(ctx context.Context, req types.LearningEvent) error {
 	// For istio proposals are inbound, so we always need to search for inbound proposal for
 	// the destination.
-	if req.DstName == "" || req.DstNamespace == "" {
-		return nil
-	}
-
 	workload, err := workloadKeyFromPod(ctx, r.Client, req.DstNamespace, req.DstName)
 	if err != nil {
-		if errors.Is(err, errUnsupportedWorkloadKind) {
-			return nil
-		}
 		return fmt.Errorf("resolving destination workload for %s/%s: %w", req.DstNamespace, req.DstName, err)
+	}
+	if _, ok := ownerkind.IsValidEndpoint(string(workload.OwnerKind)); !ok {
+		return nil
 	}
 
 	proposalName := getProposalName(workload, networkingv1.PolicyTypeIngress)
