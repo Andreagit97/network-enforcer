@@ -27,13 +27,18 @@ type LearningEnqueueFunc func(types.LearningEvent) bool
 
 const (
 	// keys.
-	eventTypeKey    = "evt.type"
-	srcIdentityKey  = "src.identity"
-	dstNamespaceKey = "dst.namespace"
-	dstNameKey      = "dst.name"
-	dstPortKey      = "dst.port"
+	eventTypeKey         = "evt.type"
+	srcIdentityKey       = "src.identity"
+	dstNamespaceKey      = "dst.namespace"
+	dstNameKey           = "dst.name"
+	dstPortKey           = "dst.port"
+	bodyKey              = "body"
+	policyKey            = "policy"
+	dstNamespacedNameKey = "dst.namespaced_name"
+	srcAddrKey           = "src.addr"
 
-	eventTypeLearn = "learn"
+	eventTypeLearn   = "learn"
+	eventTypeMonitor = "monitor"
 )
 
 // IstioScraperConfig configures IstioScraper.
@@ -126,7 +131,7 @@ func (s *IstioScraper) Export(
 				attrs := mergeAttrMaps(resourceAttrs, attrMap(record.GetAttributes()))
 				s.Logger.InfoContext(ctx, "Received OTLP log record", "attrs", attrs)
 				if attrs[eventTypeKey] != eventTypeLearn {
-					s.Logger.WarnContext(ctx, "Unexpected event type", eventTypeKey, attrs[eventTypeKey])
+					// todo!: we need to handle other events, monitor/protect
 					continue
 				}
 				if !s.EnqueueLearningEvent(types.LearningEvent{
