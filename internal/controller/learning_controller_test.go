@@ -30,10 +30,19 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 		}
 	}
 
+	clientPrincipal := "cluster.local/ns/default/sa/http-client-sa"
+	otherPrincipal := "cluster.local/ns/default/sa/other-client-sa"
+	httpServerName := "http-server"
+	httpServerHash := "6cbcc86f5d"
+	httpServerRS := httpServerName + "-" + httpServerHash
+	httpServerPodA := httpServerRS + "-aaa"
+	httpServerPodB := httpServerRS + "-bbb"
+	httpServerLabels := map[string]string{"app": httpServerName}
+
 	httpServerProposal := getProposalName(topology.WorkloadKey{
 		Namespace: testNamespace,
 		OwnerKind: ownerkind.KindDeployment,
-		OwnerName: "http-server",
+		OwnerName: httpServerName,
 	}, networkingv1.PolicyTypeIngress)
 	backendProposal := getProposalName(topology.WorkloadKey{
 		Namespace: testNamespace,
@@ -52,32 +61,185 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 		wantProposalName string
 		wantSelector     map[string]string
 		wantProposalLen  int
+		wantRules        []securityv1alpha1.IstioAuthorizationPolicyRule
 	}{
 		{
 			name: "stable proposal per deployment across replicas",
 			objs: []client.Object{
 				&appsv1.Deployment{
-					ObjectMeta: metav1.ObjectMeta{Name: "http-server", Namespace: testNamespace},
+					ObjectMeta: metav1.ObjectMeta{Name: httpServerName, Namespace: testNamespace},
 					Spec: appsv1.DeploymentSpec{
 						Selector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"app": "http-server"},
+							MatchLabels: httpServerLabels,
 						},
 					},
 				},
-				ownedPod("http-server-6cbcc86f5d-aaa", rsOwner("http-server-6cbcc86f5d"), map[string]string{
-					appsv1.DefaultDeploymentUniqueLabelKey: "6cbcc86f5d",
+				ownedPod(httpServerPodA, rsOwner(httpServerRS), map[string]string{
+					appsv1.DefaultDeploymentUniqueLabelKey: httpServerHash,
 				}),
-				ownedPod("http-server-6cbcc86f5d-bbb", rsOwner("http-server-6cbcc86f5d"), map[string]string{
-					appsv1.DefaultDeploymentUniqueLabelKey: "6cbcc86f5d",
+				ownedPod(httpServerPodB, rsOwner(httpServerRS), map[string]string{
+					appsv1.DefaultDeploymentUniqueLabelKey: httpServerHash,
 				}),
 			},
 			events: []netypes.LearningEvent{
-				{DstName: "http-server-6cbcc86f5d-aaa", DstNamespace: testNamespace},
-				{DstName: "http-server-6cbcc86f5d-bbb", DstNamespace: testNamespace},
+				{
+					DstName:      httpServerPodA,
+					DstNamespace: testNamespace,
+					DstPort:      "18080",
+					SrcIdentity:  spiffeURIPrefix + clientPrincipal,
+				},
+				{
+					DstName:      httpServerPodB,
+					DstNamespace: testNamespace,
+					DstPort:      "18080",
+					SrcIdentity:  spiffeURIPrefix + clientPrincipal,
+				},
 			},
 			wantProposalName: httpServerProposal,
-			wantSelector:     map[string]string{"app": "http-server"},
+			wantSelector:     httpServerLabels,
 			wantProposalLen:  1,
+			wantRules: []securityv1alpha1.IstioAuthorizationPolicyRule{
+				{
+					From: []securityv1alpha1.IstioFrom{
+						{Source: securityv1alpha1.IstioSource{Principals: []string{clientPrincipal}}},
+					},
+					To: []securityv1alpha1.IstioTo{
+						{Operation: securityv1alpha1.IstioOperation{Ports: []string{"18080"}}},
+					},
+				},
+			},
+		},
+		{
+			name: "merges ports and principals without duplicates",
+			objs: []client.Object{
+				&appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{Name: httpServerName, Namespace: testNamespace},
+					Spec: appsv1.DeploymentSpec{
+						Selector: &metav1.LabelSelector{
+							MatchLabels: httpServerLabels,
+						},
+					},
+				},
+				ownedPod(httpServerPodA, rsOwner(httpServerRS), map[string]string{
+					appsv1.DefaultDeploymentUniqueLabelKey: httpServerHash,
+				}),
+			},
+			events: []netypes.LearningEvent{
+				{
+					DstName:      httpServerPodA,
+					DstNamespace: testNamespace,
+					DstPort:      "18080",
+					SrcIdentity:  spiffeURIPrefix + clientPrincipal,
+				},
+				{
+					DstName:      httpServerPodA,
+					DstNamespace: testNamespace,
+					DstPort:      "18081",
+					SrcIdentity:  spiffeURIPrefix + clientPrincipal,
+				},
+				{
+					DstName:      httpServerPodA,
+					DstNamespace: testNamespace,
+					DstPort:      "18080",
+					SrcIdentity:  spiffeURIPrefix + clientPrincipal,
+				},
+				{
+					DstName:      httpServerPodA,
+					DstNamespace: testNamespace,
+					DstPort:      "18080",
+					SrcIdentity:  spiffeURIPrefix + otherPrincipal,
+				},
+			},
+			wantProposalName: httpServerProposal,
+			wantSelector:     httpServerLabels,
+			wantProposalLen:  1,
+			wantRules: []securityv1alpha1.IstioAuthorizationPolicyRule{
+				{
+					From: []securityv1alpha1.IstioFrom{
+						{Source: securityv1alpha1.IstioSource{Principals: []string{clientPrincipal}}},
+					},
+					To: []securityv1alpha1.IstioTo{
+						{Operation: securityv1alpha1.IstioOperation{Ports: []string{"18080", "18081"}}},
+					},
+				},
+				{
+					From: []securityv1alpha1.IstioFrom{
+						{Source: securityv1alpha1.IstioSource{Principals: []string{otherPrincipal}}},
+					},
+					To: []securityv1alpha1.IstioTo{
+						{Operation: securityv1alpha1.IstioOperation{Ports: []string{"18080"}}},
+					},
+				},
+			},
+		},
+		{
+			name: "does not duplicate port present in a later To entry",
+			objs: []client.Object{
+				&appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{Name: httpServerName, Namespace: testNamespace},
+					Spec: appsv1.DeploymentSpec{
+						Selector: &metav1.LabelSelector{
+							MatchLabels: httpServerLabels,
+						},
+					},
+				},
+				ownedPod(httpServerPodA, rsOwner(httpServerRS), map[string]string{
+					appsv1.DefaultDeploymentUniqueLabelKey: httpServerHash,
+				}),
+				&securityv1alpha1.WorkloadNetworkPolicyProposal{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      httpServerProposal,
+						Namespace: testNamespace,
+					},
+					Spec: securityv1alpha1.WorkloadNetworkPolicyProposalSpec{
+						PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+							Backend: securityv1alpha1.PolicyBackendIstio,
+							Istio: &securityv1alpha1.IstioAuthorizationPolicySpec{
+								Selector: metav1.LabelSelector{
+									MatchLabels: httpServerLabels,
+								},
+								Rules: []securityv1alpha1.IstioAuthorizationPolicyRule{
+									{
+										From: []securityv1alpha1.IstioFrom{
+											{
+												Source: securityv1alpha1.IstioSource{
+													Principals: []string{clientPrincipal},
+												},
+											},
+										},
+										To: []securityv1alpha1.IstioTo{
+											{Operation: securityv1alpha1.IstioOperation{Ports: []string{"18080"}}},
+											{Operation: securityv1alpha1.IstioOperation{Ports: []string{"18081"}}},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			events: []netypes.LearningEvent{
+				{
+					DstName:      httpServerPodA,
+					DstNamespace: testNamespace,
+					DstPort:      "18081",
+					SrcIdentity:  spiffeURIPrefix + clientPrincipal,
+				},
+			},
+			wantProposalName: httpServerProposal,
+			wantSelector:     httpServerLabels,
+			wantProposalLen:  1,
+			wantRules: []securityv1alpha1.IstioAuthorizationPolicyRule{
+				{
+					From: []securityv1alpha1.IstioFrom{
+						{Source: securityv1alpha1.IstioSource{Principals: []string{clientPrincipal}}},
+					},
+					To: []securityv1alpha1.IstioTo{
+						{Operation: securityv1alpha1.IstioOperation{Ports: []string{"18080"}}},
+						{Operation: securityv1alpha1.IstioOperation{Ports: []string{"18081"}}},
+					},
+				},
+			},
 		},
 		{
 			name: "skips when promoted policy exists",
@@ -96,7 +258,12 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 				promotedWNP,
 			},
 			events: []netypes.LearningEvent{
-				{DstName: "backend-7d9f8c6b5a-pod", DstNamespace: testNamespace},
+				{
+					DstName:      "backend-7d9f8c6b5a-pod",
+					DstNamespace: testNamespace,
+					DstPort:      "8080",
+					SrcIdentity:  spiffeURIPrefix + clientPrincipal,
+				},
 			},
 			wantProposalLen: 0,
 		},
@@ -112,7 +279,12 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 				}, nil),
 			},
 			events: []netypes.LearningEvent{
-				{DstName: "oneshot-pod", DstNamespace: testNamespace},
+				{
+					DstName:      "oneshot-pod",
+					DstNamespace: testNamespace,
+					DstPort:      "8080",
+					SrcIdentity:  spiffeURIPrefix + clientPrincipal,
+				},
 			},
 			wantProposalLen: 0,
 		},
@@ -146,6 +318,7 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 			require.Equal(t, securityv1alpha1.PolicyBackendIstio, proposals.Items[0].Spec.Backend)
 			require.NotNil(t, proposals.Items[0].Spec.Istio)
 			require.Equal(t, tt.wantSelector, proposals.Items[0].Spec.Istio.Selector.MatchLabels)
+			require.Equal(t, tt.wantRules, proposals.Items[0].Spec.Istio.Rules)
 		})
 	}
 }
