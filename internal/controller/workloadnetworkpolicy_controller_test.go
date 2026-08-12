@@ -37,9 +37,9 @@ func createWorkloadNetworkPolicy(
 	wnp := newTestWNP("test-policy", "default")
 	wnp.UID = types.UID("test-uid")
 	wnp.Spec.Mode = mode
-	wnp.Spec.PolicyTemplate.PodSelector.MatchLabels = map[string]string{"app": "web"}
-	wnp.Spec.PolicyTemplate.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
-	wnp.Spec.PolicyTemplate.Ingress = []networkingv1.NetworkPolicyIngressRule{
+	wnp.Spec.Kubernetes.PodSelector.MatchLabels = map[string]string{"app": "web"}
+	wnp.Spec.Kubernetes.PolicyTypes = []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
+	wnp.Spec.Kubernetes.Ingress = []networkingv1.NetworkPolicyIngressRule{
 		{
 			From: []networkingv1.NetworkPolicyPeer{
 				{

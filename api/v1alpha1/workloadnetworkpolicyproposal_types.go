@@ -17,10 +17,13 @@ limitations under the License.
 package v1alpha1
 
 import (
-	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
+
+type WorkloadNetworkPolicyProposalSpec struct {
+	PolicyBackendSpec `json:",inline"`
+}
 
 type WorkloadNetworkPolicyProposalStatus struct {
 	// conditions represent the current state of the proposal.
@@ -42,7 +45,7 @@ type WorkloadNetworkPolicyProposal struct {
 	metav1.ObjectMeta `json:"metadata,omitzero"`
 
 	// +required
-	Spec networkingv1.NetworkPolicySpec `json:"spec"`
+	Spec WorkloadNetworkPolicyProposalSpec `json:"spec"`
 
 	// +optional
 	Status WorkloadNetworkPolicyProposalStatus `json:"status,omitzero"`

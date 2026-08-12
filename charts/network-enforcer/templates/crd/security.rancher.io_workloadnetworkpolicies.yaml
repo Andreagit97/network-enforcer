@@ -57,20 +57,112 @@ spec:
             description: WorkloadNetworkPolicySpec defines the desired state of a
               WorkloadNetworkPolicy.
             properties:
-              mode:
-                default: monitor
-                description: |-
-                  Mode controls whether the policy is observed (monitor) or actively
-                  enforced (protect). Defaults to monitor.
+              backend:
+                description: Backend selects which backend policy model this object
+                  carries.
                 enum:
-                - monitor
-                - protect
+                - kubernetes
+                - istio
                 type: string
-              policyTemplate:
+              istio:
                 description: |-
-                  PolicyTemplate is the embedded networking.k8s.io NetworkPolicySpec that
-                  this resource represents at runtime. The semantics of the policy are
-                  selected by Mode; the spec itself is identical to a NetworkPolicySpec.
+                  Istio contains a constrained L4 policy model rendered as an Istio
+                  AuthorizationPolicy by the reconciler.
+                properties:
+                  rules:
+                    description: Rules is the ruleset.
+                    items:
+                      properties:
+                        from:
+                          description: From defines source identities for the rule.
+                          items:
+                            properties:
+                              source:
+                                description: Source defines the source identities
+                                  for the rule.
+                                properties:
+                                  principals:
+                                    description: Principals are the source SPIFFE
+                                      identities.
+                                    items:
+                                      type: string
+                                    type: array
+                                type: object
+                            type: object
+                          type: array
+                        to:
+                          description: To defines destination operations for the rule.
+                          items:
+                            properties:
+                              operation:
+                                description: Operation defines the destination operations
+                                  for the rule.
+                                properties:
+                                  ports:
+                                    description: Ports is the list of destination
+                                      ports.
+                                    items:
+                                      type: string
+                                    type: array
+                                type: object
+                            type: object
+                          type: array
+                      type: object
+                    type: array
+                  selector:
+                    description: Selector selects the destination workloads where
+                      the policy is enforced.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                required:
+                - selector
+                type: object
+              kubernetes:
+                description: |-
+                  Kubernetes contains the policy expressed as a standard Kubernetes
+                  NetworkPolicySpec.
                 properties:
                   egress:
                     description: |-
@@ -539,9 +631,23 @@ spec:
                     type: array
                     x-kubernetes-list-type: atomic
                 type: object
+              mode:
+                default: monitor
+                description: |-
+                  Mode controls whether the policy is observed (monitor) or actively
+                  enforced (protect). Defaults to monitor.
+                enum:
+                - monitor
+                - protect
+                type: string
             required:
-            - policyTemplate
+            - backend
             type: object
+            x-kubernetes-validations:
+            - message: backend must match exactly one populated backend spec
+              rule: 'self.backend == ''kubernetes'' ? (has(self.kubernetes) && !has(self.istio))
+                : (self.backend == ''istio'' ? (has(self.istio) && !has(self.kubernetes))
+                : false)'
           status:
             description: |-
               WorkloadNetworkPolicyStatus defines the observed state of a

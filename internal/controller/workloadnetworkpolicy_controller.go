@@ -53,6 +53,12 @@ func (r *WorkloadNetworkPolicyReconciler) Reconcile(
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	if !wnp.Spec.IsKubernetesBackend() {
+		// todo!: implement this logic for istio.
+		log.Info("Skipping reconcile for non-kubernetes backend", "backend", wnp.Spec.Backend)
+		return ctrl.Result{}, nil
+	}
+
 	if wnp.Spec.Mode == securityv1alpha1.WorkloadNetworkPolicyModeProtect {
 		return r.reconcileProtect(ctx, log, &wnp)
 	}
@@ -77,7 +83,7 @@ func (r *WorkloadNetworkPolicyReconciler) reconcileProtect(
 	}
 
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, desired, func() error {
-		wnp.Spec.PolicyTemplate.DeepCopyInto(&desired.Spec)
+		wnp.Spec.Kubernetes.DeepCopyInto(&desired.Spec)
 
 		return controllerutil.SetControllerReference(wnp, desired, r.Scheme)
 	}); err != nil {

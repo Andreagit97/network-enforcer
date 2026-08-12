@@ -88,44 +88,49 @@ func assessPolicyProposalsGenerated(ctx context.Context, t *testing.T, _ *envcon
 			Name:      "deployment-" + simpleAppClientDeploymentName + "-egress",
 			Namespace: namespace,
 		},
-		Spec: networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{"app": simpleAppClientDeploymentName},
-			},
-			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
-			Egress: []networkingv1.NetworkPolicyEgressRule{
-				{
-					Ports: []networkingv1.NetworkPolicyPort{
-						{
-							Port:     &dstPort,
-							Protocol: &tcpProtocol,
-						},
+		Spec: securityv1alpha1.WorkloadNetworkPolicyProposalSpec{
+			PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+				Backend: securityv1alpha1.PolicyBackendKubernetes,
+				Kubernetes: &networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": simpleAppClientDeploymentName},
 					},
-					To: []networkingv1.NetworkPolicyPeer{
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+					Egress: []networkingv1.NetworkPolicyEgressRule{
 						{
-							NamespaceSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{namespaceLabelKey: namespace},
+							Ports: []networkingv1.NetworkPolicyPort{
+								{
+									Port:     &dstPort,
+									Protocol: &tcpProtocol,
+								},
 							},
-							PodSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{"app": simpleAppServerDeploymentName},
+							To: []networkingv1.NetworkPolicyPeer{
+								{
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{namespaceLabelKey: namespace},
+									},
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"app": simpleAppServerDeploymentName},
+									},
+								},
 							},
 						},
-					},
-				},
-				{
-					Ports: []networkingv1.NetworkPolicyPort{
 						{
-							Port:     &dnsPort,
-							Protocol: &udpProtocol,
-						},
-					},
-					To: []networkingv1.NetworkPolicyPeer{
-						{
-							NamespaceSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{namespaceLabelKey: "kube-system"},
+							Ports: []networkingv1.NetworkPolicyPort{
+								{
+									Port:     &dnsPort,
+									Protocol: &udpProtocol,
+								},
 							},
-							PodSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{"k8s-app": "kube-dns"},
+							To: []networkingv1.NetworkPolicyPeer{
+								{
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{namespaceLabelKey: "kube-system"},
+									},
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"k8s-app": "kube-dns"},
+									},
+								},
 							},
 						},
 					},
@@ -138,27 +143,32 @@ func assessPolicyProposalsGenerated(ctx context.Context, t *testing.T, _ *envcon
 			Name:      "deployment-" + simpleAppServerDeploymentName + "-ingress",
 			Namespace: namespace,
 		},
-		Spec: networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{"app": simpleAppServerDeploymentName},
-			},
-			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
-			Ingress: []networkingv1.NetworkPolicyIngressRule{
-				{
-					From: []networkingv1.NetworkPolicyPeer{
-						{
-							NamespaceSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{namespaceLabelKey: namespace},
-							},
-							PodSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{"app": simpleAppClientDeploymentName},
-							},
-						},
+		Spec: securityv1alpha1.WorkloadNetworkPolicyProposalSpec{
+			PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+				Backend: securityv1alpha1.PolicyBackendKubernetes,
+				Kubernetes: &networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": simpleAppServerDeploymentName},
 					},
-					Ports: []networkingv1.NetworkPolicyPort{
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+					Ingress: []networkingv1.NetworkPolicyIngressRule{
 						{
-							Port:     &dstPort,
-							Protocol: &tcpProtocol,
+							From: []networkingv1.NetworkPolicyPeer{
+								{
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{namespaceLabelKey: namespace},
+									},
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"app": simpleAppClientDeploymentName},
+									},
+								},
+							},
+							Ports: []networkingv1.NetworkPolicyPort{
+								{
+									Port:     &dstPort,
+									Protocol: &tcpProtocol,
+								},
+							},
 						},
 					},
 				},
@@ -218,7 +228,7 @@ func assessPolicyProposalsPromoted(ctx context.Context, t *testing.T, _ *envconf
 		// Check the policy specs are correct.
 		require.True(t, policy.HasPromotedLabel(proposal.Name))
 		require.Equal(t, securityv1alpha1.WorkloadNetworkPolicyModeMonitor, policy.Spec.Mode)
-		require.Equal(t, proposal.Spec, policy.Spec.PolicyTemplate)
+		require.Equal(t, proposal.Spec.Kubernetes, policy.Spec.Kubernetes)
 		policies = append(policies, policy)
 
 		// We expect the proposal to be deleted
@@ -258,7 +268,7 @@ func assessPoliciesAreNotUpdatedInMonitorMode(ctx context.Context, t *testing.T,
 			}
 
 			// the spec shouldn't change
-			return !apiequality.Semantic.DeepEqual(storedPolicy.Spec.PolicyTemplate, policy.Spec.PolicyTemplate)
+			return !apiequality.Semantic.DeepEqual(storedPolicy.Spec.Kubernetes, policy.Spec.Kubernetes)
 		}, 2*getSuiteConfig(ctx).drainFlowsInterval, 1*time.Second, "Network policy is updated, but it should not be", storedPolicy.NamespacedName().String())
 
 		var policy securityv1alpha1.WorkloadNetworkPolicy
@@ -279,7 +289,7 @@ func assessPoliciesAreNotUpdatedInMonitorMode(ctx context.Context, t *testing.T,
 		// todo!: also here like in protect mode the violation Count is high and not 1
 		require.Equal(t, int64(1), policy.Status.ActiveViolationCount)
 		violation := policy.Status.Violations[0]
-		require.Equal(t, policy.Spec.PolicyTemplate.PolicyTypes[0], violation.Direction)
+		require.Equal(t, policy.Spec.Kubernetes.PolicyTypes[0], violation.Direction)
 		require.Equal(t, corev1.ProtocolUDP, violation.Protocol)
 		require.Equal(t, simpleAppUDPServerPort, violation.DstPort)
 		require.Equal(t, securityv1alpha1.WorkloadNetworkPolicyModeMonitor, violation.Action)
@@ -321,7 +331,7 @@ func assessK8sNetworkPoliciesAreCreated(ctx context.Context, t *testing.T, _ *en
 
 		require.Equal(
 			t,
-			policy.Spec.PolicyTemplate,
+			policy.Spec.Kubernetes,
 			k8sPolicy.Spec,
 			"Network policy %q spec is not equal to the expected spec",
 			policy.NamespacedName().String(),
@@ -356,7 +366,7 @@ func checkViolations(ctx context.Context, t *testing.T, _ *envconf.Config) conte
 	client := getSecurityV1Alpha1Client(ctx)
 
 	for _, policy := range storedPolicies {
-		if slices.Contains(policy.Spec.PolicyTemplate.PolicyTypes, networkingv1.PolicyTypeEgress) {
+		if slices.Contains(policy.Spec.Kubernetes.PolicyTypes, networkingv1.PolicyTypeEgress) {
 			// for the egress policy we expect a violation
 			require.Eventually(t, func() bool {
 				if err := client.Get(ctx, policy.Name, policy.Namespace, &policy); err != nil {
