@@ -40,7 +40,7 @@ func (r *WorkloadNetworkPolicyReconciler) Reconcile(
 	}
 
 	if wnp.Spec.IsKubernetesBackend() {
-		return r.reconcileK8sPolicy(ctx, log, &wnp)
+		return ctrl.Result{}, r.reconcileK8sPolicy(ctx, log, &wnp)
 	}
 	// todo!: implement this logic for istio.
 	log.Info("Skipping reconcile for non-kubernetes backend", "backend", wnp.Spec.Backend)
@@ -51,7 +51,7 @@ func (r *WorkloadNetworkPolicyReconciler) reconcileK8sPolicy(
 	ctx context.Context,
 	log logr.Logger,
 	wnp *securityv1alpha1.WorkloadNetworkPolicy,
-) (ctrl.Result, error) {
+) error {
 	if wnp.Spec.Mode == securityv1alpha1.WorkloadNetworkPolicyModeProtect {
 		return r.reconcileProtect(ctx, log, wnp)
 	}
@@ -62,9 +62,9 @@ func (r *WorkloadNetworkPolicyReconciler) reconcileProtect(
 	ctx context.Context,
 	log logr.Logger,
 	wnp *securityv1alpha1.WorkloadNetworkPolicy,
-) (ctrl.Result, error) {
+) error {
 	if err := r.validateOwnership(ctx, wnp); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
 	desired := &networkingv1.NetworkPolicy{
@@ -79,20 +79,20 @@ func (r *WorkloadNetworkPolicyReconciler) reconcileProtect(
 
 		return controllerutil.SetControllerReference(wnp, desired, r.Scheme)
 	}); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to reconcile NetworkPolicy: %w", err)
+		return fmt.Errorf("failed to reconcile NetworkPolicy: %w", err)
 	}
 
 	log.Info("Reconciled NetworkPolicy", "name", desired.Name, "namespace", desired.Namespace)
-	return ctrl.Result{}, nil
+	return nil
 }
 
 func (r *WorkloadNetworkPolicyReconciler) reconcileMonitor(
 	ctx context.Context,
 	log logr.Logger,
 	wnp *securityv1alpha1.WorkloadNetworkPolicy,
-) (ctrl.Result, error) {
+) error {
 	if err := r.validateOwnership(ctx, wnp); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
 	existing := &networkingv1.NetworkPolicy{
@@ -106,10 +106,10 @@ func (r *WorkloadNetworkPolicyReconciler) reconcileMonitor(
 	if err == nil {
 		log.Info("Deleted NetworkPolicy", "name", existing.Name, "namespace", existing.Namespace)
 	} else if !apierrors.IsNotFound(err) {
-		return ctrl.Result{}, fmt.Errorf("failed to delete NetworkPolicy: %w", err)
+		return fmt.Errorf("failed to delete NetworkPolicy: %w", err)
 	}
 
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // validateOwnership checks that any existing NetworkPolicy with the same name
