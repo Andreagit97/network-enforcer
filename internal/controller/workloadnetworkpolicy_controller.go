@@ -18,11 +18,6 @@ import (
 )
 
 // WorkloadNetworkPolicyReconciler reconciles WorkloadNetworkPolicy resources.
-//
-// In protect mode it creates/updates the corresponding
-// networking.k8s.io/NetworkPolicy owned by the WorkloadNetworkPolicy.
-// In monitor mode it ensures the NetworkPolicy is absent, so that flipping
-// mode from protect to monitor removes data-plane enforcement.
 type WorkloadNetworkPolicyReconciler struct {
 	client.Client
 
@@ -33,15 +28,6 @@ type WorkloadNetworkPolicyReconciler struct {
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile handles WorkloadNetworkPolicy create / update / delete.
-//
-// When spec.mode is "protect" the reconciler ensures a
-// networking.k8s.io/NetworkPolicy exists with spec matching
-// spec.policyTemplate and an owner reference pointing to the
-// WorkloadNetworkPolicy (so that deleting the WNP garbage-collects
-// the NetworkPolicy).
-//
-// When spec.mode is "monitor" the reconciler ensures the NetworkPolicy
-// is absent.
 func (r *WorkloadNetworkPolicyReconciler) Reconcile(
 	ctx context.Context,
 	req ctrl.Request,
@@ -53,17 +39,23 @@ func (r *WorkloadNetworkPolicyReconciler) Reconcile(
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if !wnp.Spec.IsKubernetesBackend() {
-		// todo!: implement this logic for istio.
-		log.Info("Skipping reconcile for non-kubernetes backend", "backend", wnp.Spec.Backend)
-		return ctrl.Result{}, nil
+	if wnp.Spec.IsKubernetesBackend() {
+		return r.reconcileK8sPolicy(ctx, log, &wnp)
 	}
+	// todo!: implement this logic for istio.
+	log.Info("Skipping reconcile for non-kubernetes backend", "backend", wnp.Spec.Backend)
+	return ctrl.Result{}, nil
+}
 
+func (r *WorkloadNetworkPolicyReconciler) reconcileK8sPolicy(
+	ctx context.Context,
+	log logr.Logger,
+	wnp *securityv1alpha1.WorkloadNetworkPolicy,
+) (ctrl.Result, error) {
 	if wnp.Spec.Mode == securityv1alpha1.WorkloadNetworkPolicyModeProtect {
-		return r.reconcileProtect(ctx, log, &wnp)
+		return r.reconcileProtect(ctx, log, wnp)
 	}
-
-	return r.reconcileMonitor(ctx, log, &wnp)
+	return r.reconcileMonitor(ctx, log, wnp)
 }
 
 func (r *WorkloadNetworkPolicyReconciler) reconcileProtect(
