@@ -35,7 +35,7 @@ const (
 	bodyKey              = "body"
 	policyKey            = "policy"
 	dstNamespacedNameKey = "dst.namespaced_name"
-	srcIPKey             = "src.ip"
+	srcAddrKey           = "src.addr"
 
 	eventTypeLearn   = "learn"
 	eventTypeMonitor = "monitor"

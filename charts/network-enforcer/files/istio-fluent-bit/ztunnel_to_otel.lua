@@ -29,7 +29,7 @@ local function to_monitor_event(timestamp, record)
   -- e.g. "default/deny-http-server-monitor"
   out["policy"] = record["policy"] or ""
   -- `ip:port` format
-  out["src.ip"] = inbound["peer"] or ""
+  out["src.addr"] = inbound["peer"] or ""
   out["body"] = EVT_MONITOR
   return 1, timestamp, out
 end
