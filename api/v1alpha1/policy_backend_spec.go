@@ -17,9 +17,8 @@ const (
 // +kubebuilder:validation:XValidation:rule="self.backend == 'kubernetes' ? (has(self.kubernetes) && !has(self.istio)) : (self.backend == 'istio' ? (has(self.istio) && !has(self.kubernetes)) : false)",message="backend must match exactly one populated backend spec"
 type PolicyBackendSpec struct {
 	// Backend selects which backend policy model this object carries.
-	// +kubebuilder:default=kubernetes
-	// +optional
-	Backend PolicyBackend `json:"backend,omitempty"`
+	// +kubebuilder:validation:Required
+	Backend PolicyBackend `json:"backend"`
 
 	// Kubernetes contains the policy expressed as a standard Kubernetes
 	// NetworkPolicySpec.

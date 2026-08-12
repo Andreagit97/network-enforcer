@@ -24,7 +24,7 @@ type IstioAuthorizationPolicyRule struct {
 type IstioFrom struct {
 	// Source defines the source identities for the rule.
 	// +optional
-	Source IstioSource `json:"source"`
+	Source IstioSource `json:"source,omitempty"`
 }
 
 type IstioSource struct {
@@ -36,7 +36,7 @@ type IstioSource struct {
 type IstioTo struct {
 	// Operation defines the destination operations for the rule.
 	// +optional
-	Operation IstioOperation `json:"operation"`
+	Operation IstioOperation `json:"operation,omitempty"`
 }
 
 type IstioOperation struct {

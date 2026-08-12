@@ -44,7 +44,6 @@ spec:
           spec:
             properties:
               backend:
-                default: kubernetes
                 description: Backend selects which backend policy model this object
                   carries.
                 enum:
@@ -618,6 +617,8 @@ spec:
                     type: array
                     x-kubernetes-list-type: atomic
                 type: object
+            required:
+            - backend
             type: object
             x-kubernetes-validations:
             - message: backend must match exactly one populated backend spec
