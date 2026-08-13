@@ -17,6 +17,14 @@ import (
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 )
 
+func assertNetworkPolicy(t *testing.T, expected, current *networkingv1.NetworkPolicy) {
+	t.Helper()
+	require.Equal(t, expected.Name, current.Name)
+	require.Equal(t, expected.Namespace, current.Namespace)
+	require.Equal(t, expected.Spec, current.Spec)
+	require.Equal(t, expected.OwnerReferences, current.OwnerReferences)
+}
+
 func newTestWNPreconciler(t *testing.T, objs ...client.Object) *WorkloadNetworkPolicyReconciler {
 	t.Helper()
 
@@ -61,22 +69,31 @@ func createAssociatedNetworkPolicy() *networkingv1.NetworkPolicy {
 	)
 }
 
-func TestWorkloadNetworkPolicyReconcilerProtect(t *testing.T) {
+func TestWorkloadNetworkPolicyReconcilerK8s(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name    string
-		setup   func() []client.Object
-		wantErr bool
+		name       string
+		setup      func() []client.Object
+		expectedNP *networkingv1.NetworkPolicy
 	}{
 		{
-			name: "CreateProtectMode",
+			name: "create_protect_mode",
 			setup: func() []client.Object {
 				return []client.Object{createWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeProtect)}
 			},
+			expectedNP: createAssociatedNetworkPolicy(),
 		},
 		{
-			name: "UpdatePolicyTemplate",
+			name: "create_monitor_mode",
+			setup: func() []client.Object {
+				return []client.Object{createWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeMonitor)}
+			},
+			// in monitor mode we shouldn't create a NetworkPolicy
+			expectedNP: nil,
+		},
+		{
+			name: "update_policy_template",
 			setup: func() []client.Object {
 				wnp := createWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeProtect)
 				// Also seed an existing NetworkPolicy with old spec
@@ -84,98 +101,49 @@ func TestWorkloadNetworkPolicyReconcilerProtect(t *testing.T) {
 				np.Spec.PodSelector.MatchLabels["app"] = "old"
 				return []client.Object{wnp, np}
 			},
+			expectedNP: createAssociatedNetworkPolicy(),
 		},
 		{
-			name: "UnexpectedNetworkPolicy",
+			name: "not_controller_policy_exists",
 			setup: func() []client.Object {
-				wnp := createWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeProtect)
+				wnp := createWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeMonitor)
 				// Seed an existing NetworkPolicy without owner references
+				// we shouldn't delete it since it is not controlled by us.
 				np := createAssociatedNetworkPolicy()
-				np.OwnerReferences = []metav1.OwnerReference{}
+				np.OwnerReferences = nil
 				return []client.Object{wnp, np}
 			},
-			wantErr: true,
+			expectedNP: func() *networkingv1.NetworkPolicy {
+				np := createAssociatedNetworkPolicy()
+				np.OwnerReferences = nil
+				return np
+			}(),
 		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			key := types.NamespacedName{Name: "test-policy", Namespace: "default"}
-			r := newTestWNPreconciler(t, tc.setup()...)
-			_, err := r.Reconcile(t.Context(), ctrl.Request{
-				NamespacedName: key,
-			})
-			if tc.wantErr {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-
-			var np networkingv1.NetworkPolicy
-			err = r.Get(t.Context(), key, &np)
-			require.NoError(t, err)
-			require.Equal(t, "test-policy", np.Name)
-			require.Equal(t, "default", np.Namespace)
-			require.Equal(t, "web", np.Spec.PodSelector.MatchLabels["app"])
-			require.Contains(t, np.Spec.PolicyTypes, networkingv1.PolicyTypeIngress)
-			require.Len(t, np.Spec.Ingress, 1)
-			require.Len(t, np.Spec.Ingress[0].From, 1)
-			require.NotNil(t, np.Spec.Ingress[0].From[0].PodSelector)
-			require.Equal(t, "frontend", np.Spec.Ingress[0].From[0].PodSelector.MatchLabels["role"])
-
-			// Verify owner reference is set as controller
-			require.Len(t, np.OwnerReferences, 1)
-			ref := np.OwnerReferences[0]
-			require.True(t, ref.Controller != nil && *ref.Controller)
-			require.Equal(t, "test-policy", ref.Name)
-			require.Equal(t, string(types.UID("test-uid")), string(ref.UID))
-		})
-	}
-}
-
-func TestWorkloadNetworkPolicyReconcilerMonitor(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		name  string
-		setup func() []client.Object
-	}{
 		{
-			name: "SwitchProtectToMonitor",
+			name: "protect_to_monitor",
 			setup: func() []client.Object {
 				wnp := createWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeMonitor)
 				// Seed a NetworkPolicy that exists from a previous protect mode
 				np := createAssociatedNetworkPolicy()
 				return []client.Object{wnp, np}
 			},
-		},
-		{
-			name: "MonitorModeNoop",
-			setup: func() []client.Object {
-				return []client.Object{createWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeMonitor)}
-			},
-		},
-		{
-			name: "DeleteWorkloadNetworkPolicy",
-			setup: func() []client.Object {
-				// No WorkloadNetworkPolicy in the client — simulates deletion.
-				return nil
-			},
+			expectedNP: nil,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-
-			r := newTestWNPreconciler(t, tc.setup()...)
-			_, err := r.Reconcile(t.Context(), ctrl.Request{
-				NamespacedName: types.NamespacedName{Name: "test-policy", Namespace: "default"},
-			})
-			require.NoError(t, err)
-
 			key := types.NamespacedName{Name: "test-policy", Namespace: "default"}
-			var np networkingv1.NetworkPolicy
-			err = r.Get(t.Context(), key, &np)
-			require.True(t, apierrors.IsNotFound(err), "NetworkPolicy should not exist")
+			r := newTestWNPreconciler(t, tc.setup()...)
+			_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+			require.NoError(t, err)
+			np := &networkingv1.NetworkPolicy{}
+			err = r.Get(t.Context(), key, np)
+			if tc.expectedNP == nil {
+				require.True(t, apierrors.IsNotFound(err))
+				return
+			}
+			require.NoError(t, err)
+			assertNetworkPolicy(t, tc.expectedNP, np)
 		})
 	}
 }

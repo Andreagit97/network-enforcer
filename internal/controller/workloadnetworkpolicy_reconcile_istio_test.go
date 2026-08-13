@@ -5,6 +5,7 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	istiosecurityv1beta1 "istio.io/api/security/v1beta1"
 	istiosecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -48,8 +49,10 @@ func createIstioWorkloadNetworkPolicy(
 	return wnp
 }
 
-func createAssociatedAuthorizationPolicy() *istiosecurityv1.AuthorizationPolicy {
-	wnp := createIstioWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeProtect)
+func createAssociatedAuthorizationPolicy(
+	mode securityv1alpha1.WorkloadNetworkPolicyMode,
+) *istiosecurityv1.AuthorizationPolicy {
+	wnp := createIstioWorkloadNetworkPolicy(mode)
 	ap := &istiosecurityv1.AuthorizationPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      wnp.Name,
@@ -69,115 +72,96 @@ func createAssociatedAuthorizationPolicy() *istiosecurityv1.AuthorizationPolicy 
 			BlockOwnerDeletion: &blockOwnerDeletion,
 		},
 	}
+
+	if mode == securityv1alpha1.WorkloadNetworkPolicyModeMonitor {
+		ap.Annotations = map[string]string{istioDryRunAnnotationKey: "true"}
+	}
 	return ap
+}
+
+func assertIstioPolicy(t *testing.T, expected, current *istiosecurityv1.AuthorizationPolicy) {
+	t.Helper()
+
+	require.Equal(t, expected.Name, current.Name)
+	require.Equal(t, expected.Namespace, current.Namespace)
+	require.Equal(t, expected.Annotations, current.Annotations)
+	require.Equal(t, expected.OwnerReferences, current.OwnerReferences)
+	require.Equal(t, expected.Spec.GetAction(), current.Spec.GetAction())
+	require.True(t, proto.Equal(expected.Spec.GetSelector(), current.Spec.GetSelector()))
+	require.Len(t, current.Spec.GetRules(), len(expected.Spec.GetRules()))
+	for i := range expected.Spec.GetRules() {
+		require.True(t, proto.Equal(expected.Spec.GetRules()[i], current.Spec.GetRules()[i]))
+	}
 }
 
 func TestWorkloadNetworkPolicyReconcilerIstioProtect(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name    string
-		setup   func() []client.Object
-		wantErr bool
+		name       string
+		setup      func() []client.Object
+		expectedAP *istiosecurityv1.AuthorizationPolicy
 	}{
 		{
-			name: "CreateProtectMode",
+			name: "create_protect_mode",
 			setup: func() []client.Object {
 				return []client.Object{createIstioWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeProtect)}
 			},
+			expectedAP: createAssociatedAuthorizationPolicy(securityv1alpha1.WorkloadNetworkPolicyModeProtect),
 		},
 		{
-			name: "UpdatePolicyTemplate",
-			setup: func() []client.Object {
-				wnp := createIstioWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeProtect)
-				ap := createAssociatedAuthorizationPolicy()
-				ap.Spec.Selector = nil
-				ap.Annotations = map[string]string{istioDryRunAnnotationKey: "true"}
-				return []client.Object{wnp, ap}
-			},
-		},
-		{
-			name: "UnexpectedAuthorizationPolicy",
-			setup: func() []client.Object {
-				wnp := createIstioWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeProtect)
-				ap := createAssociatedAuthorizationPolicy()
-				ap.OwnerReferences = []metav1.OwnerReference{}
-				return []client.Object{wnp, ap}
-			},
-			wantErr: true,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			key := types.NamespacedName{Name: "test-policy", Namespace: "default"}
-			r := newTestWNPreconciler(t, tc.setup()...)
-			_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
-			if tc.wantErr {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-
-			var ap istiosecurityv1.AuthorizationPolicy
-			err = r.Get(t.Context(), key, &ap)
-			require.NoError(t, err)
-			require.Equal(t, istiosecurityv1beta1.AuthorizationPolicy_ALLOW, ap.Spec.GetAction())
-			require.Equal(t, map[string]string{"app": "web"}, ap.Spec.GetSelector().GetMatchLabels())
-			require.Len(t, ap.Spec.GetRules(), 1)
-			require.Len(t, ap.Spec.GetRules()[0].GetFrom(), 1)
-			require.Equal(
-				t,
-				[]string{"cluster.local/ns/default/sa/frontend"},
-				ap.Spec.GetRules()[0].GetFrom()[0].GetSource().GetPrincipals(),
-			)
-			require.Len(t, ap.Spec.GetRules()[0].GetTo(), 1)
-			require.Equal(t, []string{"8080"}, ap.Spec.GetRules()[0].GetTo()[0].GetOperation().GetPorts())
-			require.NotContains(t, ap.Annotations, istioDryRunAnnotationKey)
-
-			require.Len(t, ap.OwnerReferences, 1)
-			ref := ap.OwnerReferences[0]
-			require.True(t, ref.Controller != nil && *ref.Controller)
-			require.Equal(t, "test-policy", ref.Name)
-			require.Equal(t, string(types.UID("test-uid")), string(ref.UID))
-		})
-	}
-}
-
-func TestWorkloadNetworkPolicyReconcilerIstioMonitor(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		name  string
-		setup func() []client.Object
-	}{
-		{
-			name: "CreateMonitorMode",
+			name: "create_monitor_mode",
 			setup: func() []client.Object {
 				return []client.Object{createIstioWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeMonitor)}
 			},
+			expectedAP: createAssociatedAuthorizationPolicy(securityv1alpha1.WorkloadNetworkPolicyModeMonitor),
 		},
 		{
-			name: "SwitchProtectToMonitor",
+			name: "not_controller_policy_exists",
 			setup: func() []client.Object {
-				wnp := createIstioWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeMonitor)
-				ap := createAssociatedAuthorizationPolicy()
-				return []client.Object{wnp, ap}
+				ap := createAssociatedAuthorizationPolicy(securityv1alpha1.WorkloadNetworkPolicyModeProtect)
+				// we remove the owner reference
+				ap.OwnerReferences = nil
+				// the WNP is in monitor mode so we need to check that after the reconciliation the not associated policy is still in protect mode and not touched.
+				return []client.Object{createIstioWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeMonitor), ap}
 			},
+			expectedAP: func() *istiosecurityv1.AuthorizationPolicy {
+				ap := createAssociatedAuthorizationPolicy(securityv1alpha1.WorkloadNetworkPolicyModeProtect)
+				ap.OwnerReferences = nil
+				return ap
+			}(),
+		},
+		{
+			name: "monitor_to_protect",
+			setup: func() []client.Object {
+				return []client.Object{
+					createIstioWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeProtect),
+					createAssociatedAuthorizationPolicy(securityv1alpha1.WorkloadNetworkPolicyModeMonitor),
+				}
+			},
+			expectedAP: createAssociatedAuthorizationPolicy(securityv1alpha1.WorkloadNetworkPolicyModeProtect),
+		},
+		{
+			name: "protect_to_monitor",
+			setup: func() []client.Object {
+				return []client.Object{
+					createIstioWorkloadNetworkPolicy(securityv1alpha1.WorkloadNetworkPolicyModeMonitor),
+					createAssociatedAuthorizationPolicy(securityv1alpha1.WorkloadNetworkPolicyModeProtect),
+				}
+			},
+			expectedAP: createAssociatedAuthorizationPolicy(securityv1alpha1.WorkloadNetworkPolicyModeMonitor),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-
 			key := types.NamespacedName{Name: "test-policy", Namespace: "default"}
 			r := newTestWNPreconciler(t, tc.setup()...)
 			_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
 			require.NoError(t, err)
-
-			var ap istiosecurityv1.AuthorizationPolicy
-			err = r.Get(t.Context(), key, &ap)
-			require.NoError(t, err)
-			require.Equal(t, "true", ap.Annotations[istioDryRunAnnotationKey])
+			currentAP := &istiosecurityv1.AuthorizationPolicy{}
+			require.NoError(t, r.Get(t.Context(),
+				types.NamespacedName{Name: tc.expectedAP.Name, Namespace: tc.expectedAP.Namespace}, currentAP))
+			assertIstioPolicy(t, tc.expectedAP, currentAP)
 		})
 	}
 }
