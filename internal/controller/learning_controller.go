@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/ownerkind"
@@ -67,6 +68,7 @@ func (r *LearningReconciler) enqueueEvent(evt types.LearningEvent) bool {
 func (r *LearningReconciler) updateProposal(
 	ctx context.Context,
 	workload topology.WorkloadKey,
+	evt types.LearningEvent,
 ) error {
 	// Istio Ambient L4 authorization is enforced on the receiving side,
 	// so learning always targets the ingress proposal.
@@ -83,12 +85,58 @@ func (r *LearningReconciler) updateProposal(
 				Selector: workloadSelector,
 			}
 		}
-		// todo!: implement the proposal population
+
+		upsertIstioLearnedRule(proposal.Spec.Istio, evt.SrcIdentity, evt.DstPort)
 		return nil
 	}); err != nil {
 		return fmt.Errorf("create or update proposal %s/%s: %w", proposal.Namespace, proposal.Name, err)
 	}
 	return nil
+}
+
+// upsertIstioLearnedRule merges a learned (principal, port) into the Istio ruleset.
+// Learning only updates rules that target exactly one source principal (a single
+// From with a single principal). In Istio, every From/principal in a rule shares
+// the same To ports, so adding a port to a multi-source rule would also allow
+// that port for the other principals. When no such single-principal rule exists,
+// a new rule is appended.
+func upsertIstioLearnedRule(
+	spec *securityv1alpha1.IstioAuthorizationPolicySpec,
+	principal, port string,
+) {
+	for i := range spec.Rules {
+		rule := &spec.Rules[i]
+		if len(rule.From) != 1 {
+			continue
+		}
+		principals := rule.From[0].Source.Principals
+		if len(principals) != 1 || principals[0] != principal {
+			continue
+		}
+		if len(rule.To) == 0 {
+			rule.To = []securityv1alpha1.IstioTo{
+				{Operation: securityv1alpha1.IstioOperation{Ports: []string{port}}},
+			}
+			return
+		}
+		for _, to := range rule.To {
+			if slices.Contains(to.Operation.Ports, port) {
+				return
+			}
+		}
+		// Port is new, attach it to the first To entry.
+		rule.To[0].Operation.Ports = append(rule.To[0].Operation.Ports, port)
+		return
+	}
+
+	spec.Rules = append(spec.Rules, securityv1alpha1.IstioAuthorizationPolicyRule{
+		From: []securityv1alpha1.IstioFrom{
+			{Source: securityv1alpha1.IstioSource{Principals: []string{principal}}},
+		},
+		To: []securityv1alpha1.IstioTo{
+			{Operation: securityv1alpha1.IstioOperation{Ports: []string{port}}},
+		},
+	})
 }
 
 func (r *LearningReconciler) processIstioLearningEvent(ctx context.Context, req types.LearningEvent) error {
@@ -111,7 +159,7 @@ func (r *LearningReconciler) processIstioLearningEvent(ctx context.Context, req 
 	switch len(policies) {
 	case 0:
 		// no policy associated with the proposal
-		return r.updateProposal(ctx, workload)
+		return r.updateProposal(ctx, workload, req)
 	case 1:
 		// we do nothing, we already have a policy
 		return nil
