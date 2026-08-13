@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	istiosecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,6 +23,7 @@ func newTestWNPreconciler(t *testing.T, objs ...client.Object) *WorkloadNetworkP
 	scheme := runtime.NewScheme()
 	require.NoError(t, securityv1alpha1.AddToScheme(scheme))
 	require.NoError(t, networkingv1.AddToScheme(scheme))
+	require.NoError(t, istiosecurityv1.AddToScheme(scheme))
 
 	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
 

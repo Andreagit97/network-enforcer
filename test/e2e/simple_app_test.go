@@ -340,7 +340,7 @@ func assessK8sNetworkPoliciesAreCreated(ctx context.Context, t *testing.T, _ *en
 			t,
 			[]metav1.OwnerReference{{
 				APIVersion:         securityv1alpha1.GroupVersion.String(),
-				Kind:               "WorkloadNetworkPolicy",
+				Kind:               securityv1alpha1.WorkloadNetworkPolicyKind,
 				Name:               policy.Name,
 				UID:                policy.UID,
 				Controller:         func(b bool) *bool { return &b }(true),
