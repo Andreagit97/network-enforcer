@@ -1,0 +1,20 @@
+apiVersion: security.rancher.io/v1alpha1
+kind: WorkloadNetworkPolicy
+metadata:
+  name: istio-networkpolicy-sample
+spec:
+  mode: protect
+  backend: istio
+  istio:
+    selector:
+      matchLabels:
+        app: http-server
+    rules:
+      - from:
+          - source:
+              principals:
+                - "cluster.local/ns/default/sa/http-client-sa"
+        to:
+          - operation:
+              ports:
+                - "80"

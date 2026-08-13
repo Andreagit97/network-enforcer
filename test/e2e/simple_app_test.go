@@ -289,7 +289,6 @@ func assessPoliciesAreNotUpdatedInMonitorMode(ctx context.Context, t *testing.T,
 		// todo!: also here like in protect mode the violation Count is high and not 1
 		require.Equal(t, int64(1), policy.Status.ActiveViolationCount)
 		violation := policy.Status.Violations[0]
-		require.Equal(t, policy.Spec.Kubernetes.PolicyTypes[0], violation.Direction)
 		require.Equal(t, corev1.ProtocolUDP, violation.Protocol)
 		require.Equal(t, simpleAppUDPServerPort, violation.DstPort)
 		require.Equal(t, securityv1alpha1.WorkloadNetworkPolicyModeMonitor, violation.Action)
@@ -400,7 +399,6 @@ func checkViolations(ctx context.Context, t *testing.T, _ *envconf.Config) conte
 			}
 			require.NotEqual(t, -1, protectIndex, "no violation with action 'protect' found")
 			violation := policy.Status.Violations[protectIndex]
-			require.Equal(t, networkingv1.PolicyTypeEgress, violation.Direction)
 			require.Equal(t, corev1.ProtocolUDP, violation.Protocol)
 			require.Equal(t, simpleAppUDPServerPort, violation.DstPort)
 			require.Equal(t, securityv1alpha1.WorkloadNetworkPolicyModeProtect, violation.Action)

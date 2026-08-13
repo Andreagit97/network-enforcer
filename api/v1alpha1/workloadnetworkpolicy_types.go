@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -52,7 +51,9 @@ type WorkloadNetworkPolicySpec struct {
 }
 
 // WorkloadRef identifies a Kubernetes workload by its namespace, owner kind,
-// and owner name.
+// and owner name. Identity is the provider-specific workload identity (SPIFFE
+// for Istio, numeric security ID for Cilium, empty for Calico); it is needed
+// for exact attribution, e.g. matching Istio principals in a policy rule.
 type WorkloadRef struct {
 	// Namespace is the Kubernetes namespace of the workload.
 	// +optional
@@ -64,26 +65,20 @@ type WorkloadRef struct {
 	// OwnerName is the name of the owner resource.
 	// +optional
 	OwnerName string `json:"ownerName,omitempty"`
+	// Identity is the provider-specific workload identity: SPIFFE for Istio,
+	// numeric security ID for Cilium, empty for Calico.
+	// +optional
+	Identity string `json:"identity,omitempty"`
 }
 
-// ViolationRecord holds the details of a single network policy violation.
-type ViolationRecord struct {
-	// ID is a per-policy unique identifier allocated by the controller
-	// when the record is first observed. It is stable across re-scrapes
-	// of the same logical violation, so consumers can refer to a single
-	// record by ID (for example when correlating with external events).
-	//
-	// Stored as int64 (not uint64) for compatibility with the Kubernetes
-	// field-management machinery used by controller-runtime's test
-	// fixtures; the counter is monotonically increasing and never goes
-	// negative, so the sign bit is never set in practice.
-	ID int64 `json:"id"`
+// ViolationInfo holds the details of a single network policy violation without
+// the controller-assigned ID. Backend scrapers produce observations in this
+// shape (see violation.Observation); the controller assigns the ID
+// when it persists the record into wnp.Status.Violations.
+// +kubebuilder:object:generate=true
+type ViolationInfo struct {
 	// Timestamp is when the violation last occurred.
 	Timestamp metav1.Time `json:"timestamp"`
-	// NodeName is the node whose cniwatcher reported the violation.
-	NodeName string `json:"nodeName"`
-	// Direction is the traffic direction.
-	Direction networkingv1.PolicyType `json:"direction"`
 	// Source is the workload that initiated the traffic.
 	// +optional
 	Source WorkloadRef `json:"source,omitempty"`
@@ -106,6 +101,25 @@ type ViolationRecord struct {
 	// DenyingPolicyName is the name of the NetworkPolicy that denied the flow.
 	// +optional
 	DenyingPolicyName string `json:"denyingPolicyName,omitempty"`
+}
+
+// ViolationRecord holds the details of a single network policy violation.
+// It embeds ViolationInfo (the violation without the ID) so that the two
+// types cannot drift apart: every violation field is defined once, in
+// ViolationInfo.
+type ViolationRecord struct {
+	ViolationInfo `json:",inline"`
+
+	// ID is a per-policy unique identifier allocated by the controller
+	// when the record is first observed. It is stable across re-scrapes
+	// of the same logical violation, so consumers can refer to a single
+	// record by ID (for example when correlating with external events).
+	//
+	// Stored as int64 (not uint64) for compatibility with the Kubernetes
+	// field-management machinery used by controller-runtime's test
+	// fixtures; the counter is monotonically increasing and never goes
+	// negative, so the sign bit is never set in practice.
+	ID int64 `json:"id"`
 }
 
 // AcknowledgedViolationRecord wraps a ViolationRecord together with the

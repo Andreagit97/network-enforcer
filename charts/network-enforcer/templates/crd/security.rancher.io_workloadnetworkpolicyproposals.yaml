@@ -50,6 +50,9 @@ spec:
                 - kubernetes
                 - istio
                 type: string
+                x-kubernetes-validations:
+                - message: backend is immutable
+                  rule: self == oldSelf
               istio:
                 description: |-
                   Istio contains a constrained L4 policy model rendered as an Istio

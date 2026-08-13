@@ -18,6 +18,7 @@ const (
 type PolicyBackendSpec struct {
 	// Backend selects which backend policy model this object carries.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="backend is immutable"
 	Backend PolicyBackend `json:"backend"`
 
 	// Kubernetes contains the policy expressed as a standard Kubernetes

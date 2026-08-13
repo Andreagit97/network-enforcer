@@ -11,7 +11,6 @@ import (
 	otellog "go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/embedded"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -99,20 +98,20 @@ func wnpWithAckAnnotation(name string) *securityv1alpha1.WorkloadNetworkPolicy {
 
 func ackTestViolation(denyingPolicyName string) securityv1alpha1.ViolationRecord {
 	return securityv1alpha1.ViolationRecord{
-		Timestamp: metav1.NewTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
-		NodeName:  "node-1",
-		Direction: networkingv1.PolicyTypeEgress,
-		Source: securityv1alpha1.WorkloadRef{
-			Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
+		ViolationInfo: securityv1alpha1.ViolationInfo{
+			Timestamp: metav1.NewTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
+			Source: securityv1alpha1.WorkloadRef{
+				Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
+			},
+			Dest: securityv1alpha1.WorkloadRef{
+				Namespace: "dst-ns", OwnerKind: "Service", OwnerName: "svc",
+			},
+			Protocol:               corev1.ProtocolTCP,
+			DstPort:                80,
+			Action:                 "protect",
+			DenyingPolicyNamespace: "ns1",
+			DenyingPolicyName:      denyingPolicyName,
 		},
-		Dest: securityv1alpha1.WorkloadRef{
-			Namespace: "dst-ns", OwnerKind: "Service", OwnerName: "svc",
-		},
-		Protocol:               corev1.ProtocolTCP,
-		DstPort:                80,
-		Action:                 "protect",
-		DenyingPolicyNamespace: "ns1",
-		DenyingPolicyName:      denyingPolicyName,
 	}
 }
 
@@ -208,7 +207,6 @@ func TestAcknowledgedViolationEventShape(t *testing.T) {
 
 	require.Equal(t, "0", attrs["id"])
 	require.Equal(t, "known issue", attrs["reason"])
-	require.Equal(t, string(networkingv1.PolicyTypeEgress), attrs["direction"])
 	require.Equal(t, "src-ns", attrs["source.namespace"])
 	require.Equal(t, "Deployment", attrs["source.workload.kind"])
 	require.Equal(t, "app", attrs["source.workload.name"])
@@ -218,7 +216,6 @@ func TestAcknowledgedViolationEventShape(t *testing.T) {
 	require.Equal(t, "TCP", attrs["protocol"])
 	require.Equal(t, "80", attrs["dstPort"])
 	require.Equal(t, "protect", attrs["action"])
-	require.Equal(t, "node-1", attrs["node.name"])
 	require.Equal(t, "ns1", attrs["denyingPolicy.namespace"])
 	require.Equal(t, "shape-policy", attrs["denyingPolicy.name"])
 }
