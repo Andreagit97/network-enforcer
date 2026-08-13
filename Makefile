@@ -240,13 +240,12 @@ define gomodver
 $(shell go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' $(1) 2>/dev/null)
 endef
 
-# Use `E2E_CNI` env variable to change CNI
-# Example: `make test-e2e E2E_CNI=cilium`
-# If E2E_CNI is not specified the default is `cilium`
+# The e2e suite installs an Istio ambient mesh (official Istio Helm charts) and
+# the network-enforcer chart on a dedicated kind cluster.
 #
 # Set E2E_USE_EXISTING_CLUSTER=true to reuse an existing cluster.
-# Set E2E_DEPENDENCIES=none to skip CNI and cert-manager installation (useful with existing clusters).
-# Example: `make test-e2e E2E_USE_EXISTING_CLUSTER=true E2E_DEPENDENCIES=cert-manager`
+# Set E2E_DEPENDENCIES=none to skip the istio/cert-manager installation (useful with existing clusters).
+# Example: `make test-e2e E2E_USE_EXISTING_CLUSTER=true E2E_DEPENDENCIES=none`
 # Set E2E_NO_REBUILD=true to skip image building.  This is useful when you're developing new e2e tests.
 .PHONY: test-e2e
 test-e2e:
@@ -255,7 +254,7 @@ ifeq ($(E2E_NO_REBUILD),)
 	$(MAKE) build-controller-image
 endif
 endif
-	@echo "🧪 Running e2e tests with '$(E2E_CNI)' CNI..."
+	@echo "🧪 Running e2e tests..."
 	E2E_USE_EXISTING_CLUSTER=$(E2E_USE_EXISTING_CLUSTER) E2E_DEPENDENCIES=$(E2E_DEPENDENCIES) go test -v ./test/e2e/... -count=1
 
 # Create kind cluster and install selected CNI with dependencies.

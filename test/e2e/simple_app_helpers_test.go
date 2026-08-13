@@ -24,9 +24,8 @@ const (
 	simpleAppManifest             = "simple_app.yaml"
 	simpleAppClientDeploymentName = "http-client"
 	simpleAppServerDeploymentName = "http-server"
+	simpleAppClientServiceAccount = "http-client-sa"
 	simpleAppTCPServicePort       = int32(18080)
-	simpleAppUDPServicePort       = int32(18083)
-	simpleAppUDPServerPort        = int32(18081)
 )
 
 func teardownSimpleAppWorkload(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
@@ -97,7 +96,6 @@ func setupSimpleAppWorkload(ctx context.Context, t *testing.T, _ *envconf.Config
 func getProtoCmd(proto corev1.Protocol) (string, []string) {
 	const (
 		tcpPayload           = "tcp-e2e-payload"
-		udpPayload           = "udp-e2e-payload"
 		simpleAppServiceName = "http-service"
 	)
 
@@ -113,22 +111,12 @@ func getProtoCmd(proto corev1.Protocol) (string, []string) {
 				simpleAppTCPServicePort,
 			),
 		}
-	case corev1.ProtocolUDP:
-		return udpPayload, []string{
-			"sh",
-			"-c",
-			fmt.Sprintf(
-				"printf %s | nc -u -w 2 %s %d",
-				strconv.Quote(udpPayload),
-				simpleAppServiceName,
-				simpleAppUDPServicePort,
-			),
-		}
-	case corev1.ProtocolSCTP:
-		fallthrough
-	default:
-		panic(fmt.Sprintf("unsupported protocol: %v", proto))
+	case corev1.ProtocolUDP, corev1.ProtocolSCTP:
+		// Istio ambient only handles TCP: UDP traffic does not pass through
+		// ztunnel, so no other protocol is part of the supported data path.
 	}
+
+	panic(fmt.Sprintf("unsupported protocol: %v", proto))
 }
 
 func execInSimpleClientDeployment(

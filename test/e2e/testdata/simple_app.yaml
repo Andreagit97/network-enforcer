@@ -1,4 +1,14 @@
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: http-client-sa
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: http-server-sa
+---
+apiVersion: v1
 kind: Service
 metadata:
   name: http-service
@@ -10,12 +20,6 @@ spec:
       protocol: TCP
       port: 18080
       targetPort: 18080
-    - name: udp-echo
-      protocol: UDP
-      # we use a different port on purpose for the service
-      # so that we can test the learning.
-      port: 18083
-      targetPort: 18081
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -31,6 +35,7 @@ spec:
       labels:
         app: http-server
     spec:
+      serviceAccountName: http-server-sa
       containers:
       - name: http-server
         image: nicolaka/netshoot:v0.16
@@ -41,8 +46,6 @@ spec:
             set -eu
             # start TCP listener
             socat -d -d TCP-LISTEN:18080,reuseaddr,fork EXEC:/bin/cat >/tmp/tcp-listener.log 2>&1 &
-            # start UDP listener
-            socat -d -d UDP-RECVFROM:18081,reuseaddr,fork EXEC:/bin/cat >/tmp/udp-listener.log 2>&1 &
             wait
 ---
 apiVersion: apps/v1
@@ -59,6 +62,7 @@ spec:
       labels:
         app: http-client
     spec:
+      serviceAccountName: http-client-sa
       containers:
         - image: nicolaka/netshoot:v0.16
           name: http-client

@@ -1,0 +1,11 @@
+# kind cluster for the Istio ambient e2e path.
+#
+# Unlike the previous CNI-watcher setup (clusters/no-cni.yaml), we keep kind's
+# default CNI (kindnet) enabled: the Istio ambient data plane requires a
+# primary interface CNI to provide pod networking, with the istio-cni chained
+# plugin layered on top to redirect ambient workloads' traffic to ztunnel.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+- role: worker
