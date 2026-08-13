@@ -51,7 +51,7 @@ func newOwnedNetworkPolicy(wnp *securityv1alpha1.WorkloadNetworkPolicy) *network
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion:         securityv1alpha1.GroupVersion.String(),
-					Kind:               "WorkloadNetworkPolicy",
+					Kind:               securityv1alpha1.WorkloadNetworkPolicyKind,
 					Name:               wnp.Name,
 					UID:                wnp.UID,
 					Controller:         &controller,
