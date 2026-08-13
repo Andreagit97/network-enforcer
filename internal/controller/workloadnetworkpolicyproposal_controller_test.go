@@ -32,6 +32,42 @@ func newTestProposalReconciler(t *testing.T, objs ...client.Object) *WorkloadNet
 	}
 }
 
+func newIstioProposal() *securityv1alpha1.WorkloadNetworkPolicyProposal {
+	return &securityv1alpha1.WorkloadNetworkPolicyProposal{
+		ObjectMeta: metav1.ObjectMeta{Name: "example", Namespace: "default"},
+		Spec: securityv1alpha1.WorkloadNetworkPolicyProposalSpec{
+			PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+				Backend: securityv1alpha1.PolicyBackendIstio,
+				Istio: &securityv1alpha1.IstioAuthorizationPolicySpec{
+					Selector: metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"app": "example",
+						},
+					},
+					Rules: []securityv1alpha1.IstioAuthorizationPolicyRule{
+						{
+							From: []securityv1alpha1.IstioFrom{
+								{
+									Source: securityv1alpha1.IstioSource{
+										Principals: []string{"cluster.local/ns/default/sa/frontend"},
+									},
+								},
+							},
+							To: []securityv1alpha1.IstioTo{
+								{
+									Operation: securityv1alpha1.IstioOperation{
+										Ports: []string{"8080"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func newBaseProposal() *securityv1alpha1.WorkloadNetworkPolicyProposal {
 	protocolUDP := corev1.ProtocolUDP
 	portDNS := intstr.FromInt32(53)
@@ -77,6 +113,7 @@ func TestWorkloadNetworkPolicyProposalReconciler(t *testing.T) {
 	t.Parallel()
 
 	baseProposal := newBaseProposal()
+	istioProposal := newIstioProposal()
 	basePolicy := securityv1alpha1.WorkloadNetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      baseProposal.Name,
@@ -167,6 +204,52 @@ func TestWorkloadNetworkPolicyProposalReconciler(t *testing.T) {
 				require.Equal(t, baseProposal.Spec.Backend, p.Spec.Backend)
 				require.Equal(t, baseProposal.Spec.Kubernetes, p.Spec.Kubernetes)
 				require.Equal(t, baseProposal.Spec.Istio, p.Spec.Istio)
+			},
+		},
+		{
+			name: "PromotionLabelMonitorIstio",
+			setup: func() []client.Object {
+				proposal := istioProposal.DeepCopy()
+				proposal.SetPromotionLabel(securityv1alpha1.WorkloadNetworkPolicyModeMonitor)
+				return []client.Object{proposal}
+			},
+			assert: func(t *testing.T, reconciler *WorkloadNetworkPolicyProposalReconciler) {
+				var p securityv1alpha1.WorkloadNetworkPolicy
+				err := reconciler.Get(t.Context(), istioProposal.NamespacedName(), &p)
+				require.NoError(t, err)
+				require.Equal(t, securityv1alpha1.WorkloadNetworkPolicyModeMonitor, p.Spec.Mode)
+				require.True(t, p.HasPromotedLabel(istioProposal.Name))
+				require.Equal(t, istioProposal.Spec.Backend, p.Spec.Backend)
+				require.Equal(t, istioProposal.Spec.Kubernetes, p.Spec.Kubernetes)
+				require.Equal(t, istioProposal.Spec.Istio, p.Spec.Istio)
+
+				var leftover securityv1alpha1.WorkloadNetworkPolicyProposal
+				err = reconciler.Get(t.Context(), istioProposal.NamespacedName(), &leftover)
+				require.Error(t, err)
+				require.True(t, apierrors.IsNotFound(err))
+			},
+		},
+		{
+			name: "PromotionLabelProtectIstio",
+			setup: func() []client.Object {
+				proposal := istioProposal.DeepCopy()
+				proposal.SetPromotionLabel(securityv1alpha1.WorkloadNetworkPolicyModeProtect)
+				return []client.Object{proposal}
+			},
+			assert: func(t *testing.T, reconciler *WorkloadNetworkPolicyProposalReconciler) {
+				var p securityv1alpha1.WorkloadNetworkPolicy
+				err := reconciler.Get(t.Context(), istioProposal.NamespacedName(), &p)
+				require.NoError(t, err)
+				require.Equal(t, securityv1alpha1.WorkloadNetworkPolicyModeProtect, p.Spec.Mode)
+				require.True(t, p.HasPromotedLabel(istioProposal.Name))
+				require.Equal(t, istioProposal.Spec.Backend, p.Spec.Backend)
+				require.Equal(t, istioProposal.Spec.Kubernetes, p.Spec.Kubernetes)
+				require.Equal(t, istioProposal.Spec.Istio, p.Spec.Istio)
+
+				var leftover securityv1alpha1.WorkloadNetworkPolicyProposal
+				err = reconciler.Get(t.Context(), istioProposal.NamespacedName(), &leftover)
+				require.Error(t, err)
+				require.True(t, apierrors.IsNotFound(err))
 			},
 		},
 		{
