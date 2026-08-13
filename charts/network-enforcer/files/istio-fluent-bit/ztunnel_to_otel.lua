@@ -5,6 +5,11 @@ local DIRECTION_INBOUND = "inbound"
 local MSG_MONITOR_PREFIX = "^dry%-run:"
 local MSG_LEARN = "connection complete"
 
+local function has_empty_field(record, key)
+  local value = record[key]
+  return value == nil or tostring(value) == ""
+end
+
 local function extract_port(address)
   if address == nil then
     return ""
@@ -37,6 +42,12 @@ end
 local function to_learn_event(timestamp, record)
   -- We are only interested in inbound connections
   if record["direction"] ~= DIRECTION_INBOUND then
+    return -1, timestamp, record
+  end
+
+  -- Skip learning when one endpoint is outside the mesh.
+  -- These logs do not include both identities.
+  if has_empty_field(record, "src.identity") or has_empty_field(record, "dst.identity") then
     return -1, timestamp, record
   end
 
