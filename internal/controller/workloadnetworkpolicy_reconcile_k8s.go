@@ -9,7 +9,6 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
@@ -18,87 +17,50 @@ func (r *WorkloadNetworkPolicyReconciler) reconcileK8sPolicy(
 	log logr.Logger,
 	wnp *securityv1alpha1.WorkloadNetworkPolicy,
 ) error {
-	if wnp.Spec.Mode == securityv1alpha1.WorkloadNetworkPolicyModeProtect {
-		return r.reconcileProtect(ctx, log, wnp)
+	np := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      wnp.Name,
+			Namespace: wnp.Namespace,
+		},
 	}
-	return r.reconcileMonitor(ctx, log, wnp)
+	err := r.Get(ctx, wnp.NamespacedName(), np)
+	switch {
+	case err != nil && !apierrors.IsNotFound(err):
+		return fmt.Errorf("failed to get NetworkPolicy: %w", err)
+	case err == nil && !metav1.IsControlledBy(np, wnp):
+		log.Error(err, "refusing to manage existing NetworkPolicy not controlled by a WorkloadNetworkPolicy",
+			"namespace", np.Namespace,
+			"name", np.Name,
+		)
+		return nil
+	case apierrors.IsNotFound(err) &&
+		wnp.Spec.Mode == securityv1alpha1.WorkloadNetworkPolicyModeMonitor:
+		// Nothing to do in monitor mode if the policy doesn't exist
+		return nil
+	default:
+	}
+
+	if wnp.Spec.Mode == securityv1alpha1.WorkloadNetworkPolicyModeMonitor {
+		log.Info("Deleting NetworkPolicy", "name", np.Name, "namespace", np.Namespace)
+		return r.Delete(ctx, np)
+	}
+	return r.reconcileProtect(ctx, log, wnp, np)
 }
 
 func (r *WorkloadNetworkPolicyReconciler) reconcileProtect(
 	ctx context.Context,
 	log logr.Logger,
 	wnp *securityv1alpha1.WorkloadNetworkPolicy,
+	np *networkingv1.NetworkPolicy,
 ) error {
-	if err := r.validateOwnership(ctx, wnp); err != nil {
-		return err
-	}
+	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, np, func() error {
+		wnp.Spec.Kubernetes.DeepCopyInto(&np.Spec)
 
-	desired := &networkingv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      wnp.Name,
-			Namespace: wnp.Namespace,
-		},
-	}
-
-	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, desired, func() error {
-		wnp.Spec.Kubernetes.DeepCopyInto(&desired.Spec)
-
-		return controllerutil.SetControllerReference(wnp, desired, r.Scheme)
+		return controllerutil.SetControllerReference(wnp, np, r.Scheme)
 	}); err != nil {
 		return fmt.Errorf("failed to reconcile NetworkPolicy: %w", err)
 	}
 
-	log.Info("Reconciled NetworkPolicy", "name", desired.Name, "namespace", desired.Namespace)
-	return nil
-}
-
-func (r *WorkloadNetworkPolicyReconciler) reconcileMonitor(
-	ctx context.Context,
-	log logr.Logger,
-	wnp *securityv1alpha1.WorkloadNetworkPolicy,
-) error {
-	if err := r.validateOwnership(ctx, wnp); err != nil {
-		return err
-	}
-
-	existing := &networkingv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      wnp.Name,
-			Namespace: wnp.Namespace,
-		},
-	}
-
-	err := r.Delete(ctx, existing)
-	if err == nil {
-		log.Info("Deleted NetworkPolicy", "name", existing.Name, "namespace", existing.Namespace)
-	} else if !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to delete NetworkPolicy: %w", err)
-	}
-
-	return nil
-}
-
-// validateOwnership checks that any existing NetworkPolicy with the same name
-// as wnp is owned by this WorkloadNetworkPolicy. Returns nil if no NetworkPolicy
-// exists or if the existing one is properly owned.
-func (r *WorkloadNetworkPolicyReconciler) validateOwnership(
-	ctx context.Context,
-	wnp *securityv1alpha1.WorkloadNetworkPolicy,
-) error {
-	key := client.ObjectKey{Name: wnp.Name, Namespace: wnp.Namespace}
-	existing := &networkingv1.NetworkPolicy{}
-	if err := r.Get(ctx, key, existing); err != nil {
-		if !apierrors.IsNotFound(err) {
-			return fmt.Errorf("failed to get NetworkPolicy: %w", err)
-		}
-		return nil
-	}
-	if !metav1.IsControlledBy(existing, wnp) {
-		return fmt.Errorf(
-			"refusing to manage existing NetworkPolicy %s/%s not controlled by WorkloadNetworkPolicy",
-			existing.Namespace,
-			existing.Name,
-		)
-	}
+	log.Info("Reconciled NetworkPolicy", "name", np.Name, "namespace", np.Namespace)
 	return nil
 }
