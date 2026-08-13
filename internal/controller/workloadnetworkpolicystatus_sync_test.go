@@ -243,26 +243,6 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			},
 		},
 		{
-			name: "drops_deny_with_empty_denying_policy",
-			sync: &WorkloadNetworkPolicyStatusSync{logger: ctrl.Log.WithName("test")},
-			violations: []*agentv1.ViolationRecord{
-				newProtoViolation(
-					ts,
-					"node-1",
-					string(networkingv1.PolicyTypeEgress),
-					"src-ns",
-					"src-app",
-					"dst-ns",
-					"dst-svc",
-					"",
-					"",
-				),
-			},
-			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
-				require.Empty(t, result)
-			},
-		},
-		{
 			name: "dedup_by_violation_key",
 			sync: &WorkloadNetworkPolicyStatusSync{},
 			violations: []*agentv1.ViolationRecord{

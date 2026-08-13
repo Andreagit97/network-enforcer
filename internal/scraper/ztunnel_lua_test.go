@@ -74,6 +74,78 @@ func TestLuaScript(t *testing.T) {
 			expectedOtelEvent: nil,
 		},
 		{
+			// Protect enforcement: an explicit DENY match carries the policy name.
+			// {"level":"info","scope":"ztunnel::state","message":"deny policy match","policy":"default/deny-http-server","proxy":{"wl":"default/http-server-7bbf596dd9-8gs65"},"inbound":{"id":"...","peer":"10.244.0.9:46266"}}
+			name: "violation_deny_policy",
+			record: map[string]any{
+				"message": "deny policy match",
+				"policy":  "default/deny-http-server",
+				"proxy": map[string]any{
+					"wl": "default/http-server-7bbf596dd9-8gs65",
+				},
+				"inbound": map[string]any{
+					"id":   "4703222e84d01205aa1511f86681682f",
+					"peer": "10.244.0.9:46266",
+				},
+			},
+			expectedOtelEvent: map[string]string{
+				eventTypeKey:         eventTypeViolation,
+				dstNamespacedNameKey: "default/http-server-7bbf596dd9-8gs65",
+				policyKey:            "default/deny-http-server",
+				srcAddrKey:           "10.244.0.9:46266",
+				bodyKey:              eventTypeViolation,
+			},
+		},
+		{
+			// Protect enforcement: an ALLOW-miss rejection has no denying policy,
+			// so the policy name is left empty.
+			// {"level":"info","scope":"ztunnel::state","message":"no allow policies matched","proxy":{"wl":"default/http-server-7bbf596dd9-8gs65"},"inbound":{"id":"...","peer":"10.244.0.9:46266"}}
+			name: "violation_allow_miss",
+			record: map[string]any{
+				"message": "no allow policies matched",
+				"proxy": map[string]any{
+					"wl": "default/http-server-7bbf596dd9-8gs65",
+				},
+				"inbound": map[string]any{
+					"id":   "8772382321babc31fe9da8ce6cb9ca31",
+					"peer": "10.244.0.9:46266",
+				},
+			},
+			expectedOtelEvent: map[string]string{
+				eventTypeKey:         eventTypeViolation,
+				dstNamespacedNameKey: "default/http-server-7bbf596dd9-8gs65",
+				policyKey:            "",
+				srcAddrKey:           "10.244.0.9:46266",
+				bodyKey:              eventTypeViolation,
+			},
+		},
+		{
+			// Protect enforcement allowed flow via an explicit ALLOW match: this
+			// is not a violation and must be dropped.
+			name: "violation_allowed_by_policy_match",
+			record: map[string]any{
+				"message": "allow policy match",
+				"policy":  "default/allow-http-server",
+				"proxy": map[string]any{
+					"wl": "default/http-server-7bbf596dd9-8gs65",
+				},
+			},
+			expectedOtelEvent: nil,
+		},
+		{
+			// Protect enforcement allowed flow when no allow policies exist at all
+			// ("no allow policies, allow"): permitted, so it must be dropped and
+			// not confused with the ALLOW-miss rejection ("no allow policies matched").
+			name: "violation_allowed_no_policies",
+			record: map[string]any{
+				"message": "no allow policies, allow",
+				"proxy": map[string]any{
+					"wl": "default/http-server-7bbf596dd9-8gs65",
+				},
+			},
+			expectedOtelEvent: nil,
+		},
+		{
 			// {"level":"info","time":"2026-08-10T08:19:58.950669Z","scope":"access","message":"connection complete","src.addr":"10.244.0.6:57866","src.workload":"http-client-7fc85576c4-h95l5","src.namespace":"default","src.identity":"spiffe://cluster.local/ns/default/sa/http-client-sa","dst.addr":"10.244.0.7:15008","dst.hbone_addr":"10.244.0.7:18080","dst.service":"http-service.default.svc.cluster.local","dst.workload":"http-server-7bbf596dd9-4rgdc","dst.namespace":"default","dst.identity":"spiffe://cluster.local/ns/default/sa/http-server-sa","direction":"outbound","bytes_sent":16,"bytes_recv":16,"duration":"1006ms"}
 			name: "learn_outbound",
 			record: map[string]any{
