@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/ownerkind"
@@ -21,8 +20,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
-
-const spiffeURIPrefix = "spiffe://"
 
 const (
 	// DefaultEventChannelBufferSize defines the channel buffer size used to
@@ -89,11 +86,7 @@ func (r *LearningReconciler) updateProposal(
 			}
 		}
 
-		principal := strings.TrimPrefix(evt.SrcIdentity, spiffeURIPrefix)
-		if principal == "" || evt.DstPort == "" {
-			return nil
-		}
-		upsertIstioLearnedRule(proposal.Spec.Istio, principal, evt.DstPort)
+		upsertIstioLearnedRule(proposal.Spec.Istio, evt.SrcIdentity, evt.DstPort)
 		return nil
 	}); err != nil {
 		return fmt.Errorf("create or update proposal %s/%s: %w", proposal.Namespace, proposal.Name, err)

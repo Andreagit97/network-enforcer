@@ -40,6 +40,8 @@ const (
 
 	eventTypeLearn   = "learn"
 	eventTypeMonitor = "monitor"
+
+	spiffeURIPrefix = "spiffe://"
 )
 
 // IstioScraperConfig configures IstioScraper.
@@ -137,10 +139,14 @@ func (s *IstioScraper) Export(
 				}
 				dstName := attrs[dstNameKey]
 				dstNamespace := attrs[dstNamespaceKey]
-				if dstName == "" || dstNamespace == "" {
-					s.Logger.WarnContext(ctx, "Skipping learning event with missing destination identity",
+				dstPort := attrs[dstPortKey]
+				srcIdentity, hasSPIFFEPrefix := strings.CutPrefix(attrs[srcIdentityKey], spiffeURIPrefix)
+				if dstName == "" || dstNamespace == "" || dstPort == "" || !hasSPIFFEPrefix || srcIdentity == "" {
+					s.Logger.WarnContext(ctx, "Skipping learning event with missing required fields",
 						dstNameKey, dstName,
 						dstNamespaceKey, dstNamespace,
+						dstPortKey, dstPort,
+						srcIdentityKey, attrs[srcIdentityKey],
 						"attrs", attrs,
 					)
 					continue
@@ -148,11 +154,8 @@ func (s *IstioScraper) Export(
 				if !s.EnqueueLearningEvent(types.LearningEvent{
 					DstName:      dstName,
 					DstNamespace: dstNamespace,
-					DstPort:      attrs[dstPortKey],
-					// Strip the `spiffe://` scheme as soon as we ingest the
-					// identity: the canonical principal form (Istio convention and
-					// our stored WorkloadRef.Identity) carries no prefix.
-					SrcIdentity: strings.TrimPrefix(attrs[srcIdentityKey], "spiffe://"),
+					DstPort:      dstPort,
+					SrcIdentity:  srcIdentity,
 				}) {
 					// todo!: we can consider some rate limiting here
 					s.Logger.WarnContext(ctx, "Failed to enqueue learning event, channel is full")
