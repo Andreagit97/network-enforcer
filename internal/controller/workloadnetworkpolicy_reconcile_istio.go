@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 
+	"github.com/go-logr/logr"
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	istiosecurityv1beta1 "istio.io/api/security/v1beta1"
 	istiotypev1beta1 "istio.io/api/type/v1beta1"
@@ -20,6 +21,7 @@ const istioDryRunAnnotationKey = "istio.io/dry-run"
 
 func (r *WorkloadNetworkPolicyReconciler) reconcileIstioPolicy(
 	ctx context.Context,
+	log logr.Logger,
 	wnp *securityv1alpha1.WorkloadNetworkPolicy,
 ) error {
 	ap := &istiosecurityv1.AuthorizationPolicy{
@@ -34,12 +36,13 @@ func (r *WorkloadNetworkPolicyReconciler) reconcileIstioPolicy(
 	}
 	if err == nil {
 		// if the policy exists it should be controlled by the WorkloadNetworkPolicy
+		// we just log an error and we stop the reconciliation since we cannot do anything from the controller.
 		if !metav1.IsControlledBy(ap, wnp) {
-			return fmt.Errorf(
-				"refusing to manage existing AuthorizationPolicy %s/%s not controlled by WorkloadNetworkPolicy",
-				ap.Namespace,
-				ap.Name,
+			log.Error(err, "refusing to manage existing AuthorizationPolicy not controlled by a WorkloadNetworkPolicy",
+				"namespace", ap.Namespace,
+				"name", ap.Name,
 			)
+			return nil
 		}
 	}
 

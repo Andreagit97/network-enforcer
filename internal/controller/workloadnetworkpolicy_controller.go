@@ -39,7 +39,7 @@ func (r *WorkloadNetworkPolicyReconciler) Reconcile(
 	if wnp.Spec.IsKubernetesBackend() {
 		return ctrl.Result{}, r.reconcileK8sPolicy(ctx, log, &wnp)
 	}
-	return ctrl.Result{}, r.reconcileIstioPolicy(ctx, &wnp)
+	return ctrl.Result{}, r.reconcileIstioPolicy(ctx, log, &wnp)
 }
 
 // SetupWithManager sets up the controller with the Manager.
