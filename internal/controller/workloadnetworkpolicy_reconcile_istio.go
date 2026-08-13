@@ -46,7 +46,7 @@ func (r *WorkloadNetworkPolicyReconciler) reconcileIstioPolicy(
 		}
 	}
 
-	if _, err = controllerutil.CreateOrUpdate(ctx, r.Client, ap, func() error {
+	if _, err = controllerutil.CreateOrPatch(ctx, r.Client, ap, func() error {
 		populateIstioAuthorizationPolicySpec(&ap.Spec, wnp.Spec.Istio)
 
 		if ap.Annotations == nil {
