@@ -93,6 +93,7 @@ func TestLuaScript(t *testing.T) {
 			record: map[string]any{
 				"message":        learningMessage,
 				"src.identity":   "spiffe://cluster.local/ns/default/sa/http-client-sa",
+				"dst.identity":   "spiffe://cluster.local/ns/default/sa/http-server-sa",
 				"dst.hbone_addr": "10.244.0.7:18080",
 				"dst.workload":   "http-server-7bbf596dd9-4rgdc",
 				"dst.namespace":  "default",
@@ -106,6 +107,33 @@ func TestLuaScript(t *testing.T) {
 				srcIdentityKey:  "spiffe://cluster.local/ns/default/sa/http-client-sa",
 				bodyKey:         eventTypeLearn,
 			},
+		},
+		{
+			// src.addr=10.244.0.17:34010 src.workload="client" src.namespace="istio-system" dst.addr=10.244.1.15:18080 dst.service="http-service.default.svc.cluster.local" dst.workload="http-server-6cbcc86f5d-bxb9w" dst.namespace="default" direction="inbound" bytes_sent=16 bytes_recv=16 duration="1004ms"
+			name: "learn_source_outside_mesh",
+			record: map[string]any{
+				"message":       learningMessage,
+				"dst.workload":  "http-server-6cbcc86f5d-bxb9w",
+				"dst.namespace": "default",
+				"dst.addr":      "10.244.1.15:18080",
+				"direction":     "inbound",
+			},
+			expectedOtelEvent: nil,
+		},
+		{
+			// complete src.addr=10.244.0.5:54646 src.workload="http-client-6b4b85489f-t6sl2" src.namespace="default" dst.addr=142.251.209.46:80 direction="outbound" bytes_sent=74 bytes_recv=773 duration="357ms"
+			// in case of destination outside the mesh the direction will be always outbound so the traffic is dropped for 2 reasons:
+			// 1. the destination identity is not present
+			// 2. the direction is outbound
+			name: "learn_destination_outside_mesh",
+			record: map[string]any{
+				"message":       learningMessage,
+				"src.workload":  "http-client-6b4b85489f-t6sl2",
+				"src.namespace": "default",
+				"dst.addr":      "142.251.209.46:80",
+				"direction":     "outbound",
+			},
+			expectedOtelEvent: nil,
 		},
 		{
 			name: "learn_wrong_trigger_message",
