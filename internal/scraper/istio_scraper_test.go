@@ -130,7 +130,7 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 		{
 			name: "violation explicit DENY routed to violation buffer",
 			attrs: map[string]string{
-				eventTypeKey:         eventTypeViolation,
+				eventTypeKey:         eventTypeProtect,
 				dstNamespacedNameKey: "default/http-server-6cbcc86f5d-lhq82",
 				policyKey:            "default/deny-http-server-protect",
 				srcAddrKey:           "10.244.0.5:49084",
@@ -151,7 +151,7 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 		{
 			name: "violation ALLOW-miss routed to violation buffer without policy",
 			attrs: map[string]string{
-				eventTypeKey:         eventTypeViolation,
+				eventTypeKey:         eventTypeProtect,
 				dstNamespacedNameKey: "default/http-server-6cbcc86f5d-lhq82",
 				srcAddrKey:           "10.244.0.5:52814",
 			},
@@ -219,7 +219,7 @@ func TestPolicyEventToObservation(t *testing.T) {
 	unixNano := time.Date(2026, 8, 3, 15, 39, 7, 0, time.UTC).UnixNano()
 
 	attrs := map[string]string{
-		eventTypeKey:         eventTypeViolation,
+		eventTypeKey:         eventTypeProtect,
 		dstNamespacedNameKey: "default/http-server-6cbcc86f5d-lhq82",
 		policyKey:            "default/deny-http-server-protect",
 		srcAddrKey:           "10.244.0.5:49084",
