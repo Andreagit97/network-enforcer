@@ -217,20 +217,8 @@ func (r *WorkloadNetworkPolicyStatusSync) correlateViolationsToWNPs(
 	result := make(map[types.NamespacedName][]securityv1alpha1.ViolationRecord)
 
 	for _, v := range scraped {
-		// the k8s network policy should have the same name of the
-		// workload network policy.
-		wnpKey := types.NamespacedName{
-			Namespace: v.GetDenyingPolicyNamespace(),
-			Name:      v.GetDenyingPolicyName(),
-		}
-
-		// if we don't find a WNP, we can't correlate the violation and so we log a warning
-		if _, ok := wnpByKey[wnpKey]; !ok {
-			r.logger.Info(
-				"Denying WorkloadNetworkPolicy not found; violation may be caused by a policy not managed by us",
-				"denyingPolicy",
-				wnpKey.String(),
-			)
+		wnpKey, ok := r.wnpKeyForViolation(v, wnpByKey)
+		if !ok {
 			continue
 		}
 
@@ -256,6 +244,45 @@ func (r *WorkloadNetworkPolicyStatusSync) correlateViolationsToWNPs(
 	}
 
 	return result
+}
+
+// wnpKeyForViolation resolves the owning WorkloadNetworkPolicy for a scraped
+// violation and reports whether a match was found.
+//
+// Only explicit DENY violations are supported: they carry the denying policy
+// name, and for the Istio provider the enforcing AuthorizationPolicy shares the
+// WNP name, so the policy ref keys the WNP directly. ALLOW-miss violations (no
+// denying policy name) are not yet correlated and are dropped.
+func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForViolation(
+	v *agentv1.ViolationRecord,
+	wnpByKey map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy,
+) (types.NamespacedName, bool) {
+	if v.GetDenyingPolicyName() == "" {
+		// ALLOW-miss violations are not correlated yet; drop them but keep a
+		// debug trace so they are observable.
+		r.logger.V(1).Info(
+			"Dropping violation without a denying policy name (ALLOW-miss not yet supported)",
+			"destNamespace", v.GetDestNamespace(),
+			"destName", v.GetDestName(),
+		)
+		return types.NamespacedName{}, false
+	}
+
+	// the k8s network policy should have the same name of the
+	// workload network policy.
+	wnpKey := types.NamespacedName{
+		Namespace: v.GetDenyingPolicyNamespace(),
+		Name:      v.GetDenyingPolicyName(),
+	}
+	if _, ok := wnpByKey[wnpKey]; !ok {
+		r.logger.Info(
+			"Denying WorkloadNetworkPolicy not found; violation may be caused by a policy not managed by us",
+			"denyingPolicy",
+			wnpKey.String(),
+		)
+		return types.NamespacedName{}, false
+	}
+	return wnpKey, true
 }
 
 // convertProtoViolation converts a protobuf ViolationRecord to the API type.
