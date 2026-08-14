@@ -176,8 +176,8 @@ type WorkloadNetworkPolicyStatus struct {
 const MaxViolationRecords = 100
 
 // WorkloadNetworkPolicy is the schema for the runtime network policy API.
-// It wraps a standard networkingv1.NetworkPolicySpec and selects a mode
-// (monitor or protect). The resource is intentionally namespaced and uses
+// Spec carries a backend-specific policy payload (Kubernetes or Istio) and a
+// mode (monitor or protect). The resource is intentionally namespaced and uses
 // the `security.rancher.io` group to avoid colliding with the upstream
 // `networking.k8s.io/NetworkPolicy` kind.
 //

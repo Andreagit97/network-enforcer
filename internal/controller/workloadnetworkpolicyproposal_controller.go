@@ -66,15 +66,6 @@ func (r *WorkloadNetworkPolicyProposalReconciler) Reconcile(
 		return ctrl.Result{}, nil
 	}
 
-	if !proposal.Spec.IsKubernetesBackend() {
-		// todo!: implement promotion
-		log.Info("Skipping WorkloadNetworkPolicyProposal because non-Kubernetes backend is not supported",
-			"proposal",
-			proposal.Name,
-		)
-		return ctrl.Result{}, nil
-	}
-
 	policy := securityv1alpha1.WorkloadNetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      proposal.Name,
