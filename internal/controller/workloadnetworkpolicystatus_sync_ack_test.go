@@ -118,7 +118,6 @@ func ackTestViolation(denyingPolicyName string) securityv1alpha1.ViolationRecord
 func newTestWorkloadNetworkStatusSync(client client.Client) *WorkloadNetworkPolicyStatusSync {
 	return &WorkloadNetworkPolicyStatusSync{
 		Client:          client,
-		agentClientPool: &fakePool{},
 		updateInterval:  time.Hour,
 		eventLogger:     &fakeEventLogger{},
 		logger:          ctrl.Log.WithName("test"),
@@ -128,11 +127,6 @@ func newTestWorkloadNetworkStatusSync(client client.Client) *WorkloadNetworkPoli
 
 func (r *WorkloadNetworkPolicyStatusSync) withLogger(logger otellog.Logger) *WorkloadNetworkPolicyStatusSync {
 	r.eventLogger = logger
-	return r
-}
-
-func (r *WorkloadNetworkPolicyStatusSync) withPool(pool AgentClientPoolAPI) *WorkloadNetworkPolicyStatusSync {
-	r.agentClientPool = pool
 	return r
 }
 

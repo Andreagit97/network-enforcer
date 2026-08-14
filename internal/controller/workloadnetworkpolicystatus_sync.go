@@ -5,14 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/rancher-sandbox/network-enforcer/internal/types/loglevel"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	otellog "go.opentelemetry.io/otel/log"
-	"google.golang.org/protobuf/types/known/timestamppb"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -24,16 +22,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
-	"github.com/rancher-sandbox/network-enforcer/internal/grpcexporter"
-	agentv1 "github.com/rancher-sandbox/network-enforcer/proto/agent/v1"
 )
 
 const eventNamePolicyViolationAcknowledged = "policy_violation_acknowledged"
-
-type AgentClientPoolAPI interface {
-	UpdatePool(ctx context.Context, reader client.Reader) (map[string]grpcexporter.AgentClientAPI, error)
-	MarkStaleAgentClient(nodeName string)
-}
 
 // +kubebuilder:rbac:groups=security.rancher.io,resources=workloadnetworkpolicies/status,verbs=get;patch;update
 
@@ -44,7 +35,6 @@ type AgentClientPoolAPI interface {
 type WorkloadNetworkPolicyStatusSync struct {
 	client.Client
 
-	agentClientPool AgentClientPoolAPI
 	updateInterval  time.Duration
 	eventLogger     otellog.Logger
 	logger          logr.Logger
@@ -52,7 +42,6 @@ type WorkloadNetworkPolicyStatusSync struct {
 }
 
 type WorkloadNetworkPolicyStatusSyncConfig struct {
-	AgentPoolConf  grpcexporter.AgentClientPoolConfig
 	UpdateInterval time.Duration
 	// EventLogger for OTLP policy_violation_acknowledged; nil = disabled.
 	EventLogger     otellog.Logger
@@ -94,23 +83,14 @@ func (r *WorkloadNetworkPolicyStatusSync) Start(ctx context.Context) error {
 	}
 }
 
-func convertMonitorViolations(
+func convertObservationsToViolations(
 	monitorViolation []violation.Observation,
-) []*agentv1.ViolationRecord {
-	result := make([]*agentv1.ViolationRecord, 0, len(monitorViolation))
+) []securityv1alpha1.ViolationRecord {
+	result := make([]securityv1alpha1.ViolationRecord, 0, len(monitorViolation))
 	for _, v := range monitorViolation {
 		result = append(result,
-			&agentv1.ViolationRecord{
-				Timestamp:              timestamppb.New(v.Timestamp.Time),
-				SourceNamespace:        v.Source.Namespace,
-				SourceName:             v.Source.OwnerName,
-				DestNamespace:          v.Dest.Namespace,
-				DestName:               v.Dest.OwnerName,
-				Protocol:               string(v.Protocol),
-				DstPort:                v.DstPort,
-				Action:                 string(v.Action),
-				DenyingPolicyNamespace: v.DenyingPolicyNamespace,
-				DenyingPolicyName:      v.DenyingPolicyName,
+			securityv1alpha1.ViolationRecord{
+				ViolationInfo: v.ViolationInfo,
 			})
 	}
 	return result
@@ -141,9 +121,9 @@ func (r *WorkloadNetworkPolicyStatusSync) sync(ctx context.Context) error {
 	}
 
 	// monitor violations coming from the topology scraper
-	monitorViolation := convertMonitorViolations(r.violationBuffer.Drain())
+	violations := convertObservationsToViolations(r.violationBuffer.Drain())
 	// Group scraped violations by the owning WNP
-	violationsByWNP := r.correlateViolationsToWNPs(ctx, monitorViolation, ownedIndex, wnpByKey)
+	violationsByWNP := r.correlateViolationsToWNPs(ctx, violations, ownedIndex, wnpByKey)
 
 	// Process every WNP: those with scraped violations get them merged;
 	// those without still get clearAllowedViolations + acknowledgeViolationsFromAnnotations.
@@ -209,7 +189,7 @@ func findWNPOwnerRef(
 // Violations with no owning WNP are dropped; deleted denying NetPols log a warning.
 func (r *WorkloadNetworkPolicyStatusSync) correlateViolationsToWNPs(
 	ctx context.Context,
-	scraped []*agentv1.ViolationRecord,
+	scraped []securityv1alpha1.ViolationRecord,
 	ownedIndex map[types.NamespacedName]*types.NamespacedName,
 	wnpByKey map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy,
 ) map[types.NamespacedName][]securityv1alpha1.ViolationRecord {
@@ -239,7 +219,7 @@ func (r *WorkloadNetworkPolicyStatusSync) correlateViolationsToWNPs(
 			continue
 		}
 
-		result[wnpKey] = append(result[wnpKey], convertProtoViolation(v))
+		result[wnpKey] = append(result[wnpKey], v)
 	}
 
 	return result
@@ -255,10 +235,10 @@ func (r *WorkloadNetworkPolicyStatusSync) correlateViolationsToWNPs(
 // pod's labels against the existing WNP selectors.
 func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForViolation(
 	ctx context.Context,
-	v *agentv1.ViolationRecord,
+	v securityv1alpha1.ViolationRecord,
 	wnpByKey map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy,
 ) (types.NamespacedName, bool) {
-	if v.GetDenyingPolicyName() == "" {
+	if v.DenyingPolicyName == "" {
 		// ALLOW-miss: no denying policy name. The owning WNP name is not knowable
 		// from the event (users may name their WNPs freely), so search the
 		// existing WNPs for one whose selector matches the destination pod.
@@ -268,8 +248,8 @@ func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForViolation(
 	// the k8s network policy should have the same name of the
 	// workload network policy.
 	wnpKey := types.NamespacedName{
-		Namespace: v.GetDenyingPolicyNamespace(),
-		Name:      v.GetDenyingPolicyName(),
+		Namespace: v.DenyingPolicyNamespace,
+		Name:      v.DenyingPolicyName,
 	}
 	if _, ok := wnpByKey[wnpKey]; !ok {
 		r.logger.Info(
@@ -291,11 +271,11 @@ func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForViolation(
 // (e.g. it has already been deleted), or no WNP selects the pod.
 func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForDestWorkload(
 	ctx context.Context,
-	v *agentv1.ViolationRecord,
+	v securityv1alpha1.ViolationRecord,
 	wnpByKey map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy,
 ) (types.NamespacedName, bool) {
-	dstNamespace := v.GetDestNamespace()
-	dstPod := v.GetDestName()
+	dstNamespace := v.Dest.Namespace
+	dstPod := v.Dest.OwnerName
 	if dstNamespace == "" || dstPod == "" {
 		r.logger.Info("ALLOW-miss violation has no destination workload, cannot correlate")
 		return types.NamespacedName{}, false
@@ -390,57 +370,6 @@ func wnpPodSelector(wnp *securityv1alpha1.WorkloadNetworkPolicy) (*metav1.LabelS
 		}
 	}
 	return nil, false
-}
-
-// convertProtoViolation converts a protobuf ViolationRecord to the API type.
-func convertProtoViolation(v *agentv1.ViolationRecord) securityv1alpha1.ViolationRecord {
-	ownerKind, ownerName := parseWorkload(v.GetSourceWorkloads())
-	if ownerName == "" {
-		ownerName = v.GetSourceName()
-	}
-	source := securityv1alpha1.WorkloadRef{
-		Namespace: v.GetSourceNamespace(),
-		OwnerKind: ownerKind,
-		OwnerName: ownerName,
-	}
-
-	destKind, destName := parseWorkload(v.GetDestWorkloads())
-	if destName == "" {
-		destName = v.GetDestName()
-	}
-	dest := securityv1alpha1.WorkloadRef{
-		Namespace: v.GetDestNamespace(),
-		OwnerKind: destKind,
-		OwnerName: destName,
-	}
-
-	return securityv1alpha1.ViolationRecord{
-		ViolationInfo: securityv1alpha1.ViolationInfo{
-			Timestamp:              metav1.NewTime(v.GetTimestamp().AsTime()),
-			Source:                 source,
-			Dest:                   dest,
-			Protocol:               corev1.Protocol(v.GetProtocol()),
-			DstPort:                v.GetDstPort(),
-			Action:                 securityv1alpha1.WorkloadNetworkPolicyMode(v.GetAction()),
-			DenyingPolicyNamespace: v.GetDenyingPolicyNamespace(),
-			DenyingPolicyName:      v.GetDenyingPolicyName(),
-		},
-	}
-}
-
-// parseWorkload splits the first element of workloads at the first '/'.
-// Returns (kind, name) or ("", workload) if no separator is found.
-func parseWorkload(workloads []string) (string, string) {
-	if len(workloads) == 0 {
-		return "", ""
-	}
-	wl := workloads[0]
-	const splitParts = 2
-	parts := strings.SplitN(wl, "/", splitParts)
-	if len(parts) == splitParts {
-		return parts[0], parts[1]
-	}
-	return "", wl
 }
 
 // processWorkloadNetworkPolicy patches status then annotations using a
