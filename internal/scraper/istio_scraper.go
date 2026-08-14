@@ -45,9 +45,9 @@ const (
 	dstNamespacedNameKey = "dst.namespaced_name"
 	srcAddrKey           = "src.addr"
 
-	eventTypeLearn     = "learn"
-	eventTypeMonitor   = "monitor"
-	eventTypeViolation = "violation"
+	eventTypeLearn   = "learn"
+	eventTypeMonitor = "monitor"
+	eventTypeProtect = "protect"
 
 	spiffeURIPrefix = "spiffe://"
 )
@@ -144,7 +144,7 @@ func (s *IstioScraper) Export(
 				switch attrs[eventTypeKey] {
 				case eventTypeLearn:
 					s.enqueueLearningEvent(ctx, attrs)
-				case eventTypeMonitor, eventTypeViolation:
+				case eventTypeMonitor, eventTypeProtect:
 					// monitor and violation records share the same plumbing: they are
 					// both routed through the violation path, differing only in the
 					// enforcement action (monitor dry-run vs protect enforcement).

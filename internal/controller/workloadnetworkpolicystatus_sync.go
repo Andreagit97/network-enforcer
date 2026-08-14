@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,7 +13,9 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -145,7 +148,7 @@ func (r *WorkloadNetworkPolicyStatusSync) sync(ctx context.Context) error {
 	// monitor violations coming from the topology scraper
 	monitorViolation := convertMonitorViolations(r.monitorViolationBuffer.Drain())
 	// Group scraped violations by the owning WNP
-	violationsByWNP := r.correlateViolationsToWNPs(monitorViolation, ownedIndex, wnpByKey)
+	violationsByWNP := r.correlateViolationsToWNPs(ctx, monitorViolation, ownedIndex, wnpByKey)
 
 	// Process every WNP: those with scraped violations get them merged;
 	// those without still get clearAllowedViolations + acknowledgeViolationsFromAnnotations.
@@ -210,6 +213,7 @@ func findWNPOwnerRef(
 // correlateViolationsToWNPs groups scraped violations by the owning WNP.
 // Violations with no owning WNP are dropped; deleted denying NetPols log a warning.
 func (r *WorkloadNetworkPolicyStatusSync) correlateViolationsToWNPs(
+	ctx context.Context,
 	scraped []*agentv1.ViolationRecord,
 	ownedIndex map[types.NamespacedName]*types.NamespacedName,
 	wnpByKey map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy,
@@ -217,7 +221,7 @@ func (r *WorkloadNetworkPolicyStatusSync) correlateViolationsToWNPs(
 	result := make(map[types.NamespacedName][]securityv1alpha1.ViolationRecord)
 
 	for _, v := range scraped {
-		wnpKey, ok := r.wnpKeyForViolation(v, wnpByKey)
+		wnpKey, ok := r.wnpKeyForViolation(ctx, v, wnpByKey)
 		if !ok {
 			continue
 		}
@@ -249,23 +253,21 @@ func (r *WorkloadNetworkPolicyStatusSync) correlateViolationsToWNPs(
 // wnpKeyForViolation resolves the owning WorkloadNetworkPolicy for a scraped
 // violation and reports whether a match was found.
 //
-// Only explicit DENY violations are supported: they carry the denying policy
-// name, and for the Istio provider the enforcing AuthorizationPolicy shares the
-// WNP name, so the policy ref keys the WNP directly. ALLOW-miss violations (no
-// denying policy name) are not yet correlated and are dropped.
+// An explicit DENY carries the denying policy name; for the Istio provider the
+// enforcing AuthorizationPolicy shares the WNP name, so the policy ref keys the
+// WNP directly. An ALLOW-miss carries no policy name: since these events are
+// produced on the destination ztunnel, we fall back to matching the destination
+// pod's labels against the existing WNP selectors.
 func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForViolation(
+	ctx context.Context,
 	v *agentv1.ViolationRecord,
 	wnpByKey map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy,
 ) (types.NamespacedName, bool) {
 	if v.GetDenyingPolicyName() == "" {
-		// ALLOW-miss violations are not correlated yet; drop them but keep a
-		// debug trace so they are observable.
-		r.logger.V(1).Info(
-			"Dropping violation without a denying policy name (ALLOW-miss not yet supported)",
-			"destNamespace", v.GetDestNamespace(),
-			"destName", v.GetDestName(),
-		)
-		return types.NamespacedName{}, false
+		// ALLOW-miss: no denying policy name. The owning WNP name is not knowable
+		// from the event (users may name their WNPs freely), so search the
+		// existing WNPs for one whose selector matches the destination pod.
+		return r.wnpKeyForDestWorkload(ctx, v, wnpByKey)
 	}
 
 	// the k8s network policy should have the same name of the
@@ -283,6 +285,116 @@ func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForViolation(
 		return types.NamespacedName{}, false
 	}
 	return wnpKey, true
+}
+
+// wnpKeyForDestWorkload finds the WorkloadNetworkPolicy that owns the
+// destination pod of an ALLOW-miss violation by matching the pod's labels
+// against each WNP's selector. Reconstructing the WNP name is not possible
+// because users may name their WNPs freely, so we search instead.
+//
+// It reports false when the destination is missing, the pod cannot be fetched
+// (e.g. it has already been deleted), or no WNP selects the pod.
+func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForDestWorkload(
+	ctx context.Context,
+	v *agentv1.ViolationRecord,
+	wnpByKey map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy,
+) (types.NamespacedName, bool) {
+	dstNamespace := v.GetDestNamespace()
+	dstPod := v.GetDestName()
+	if dstNamespace == "" || dstPod == "" {
+		r.logger.Info("ALLOW-miss violation has no destination workload, cannot correlate")
+		return types.NamespacedName{}, false
+	}
+
+	var pod corev1.Pod
+	if err := r.Get(ctx, types.NamespacedName{Namespace: dstNamespace, Name: dstPod}, &pod); err != nil {
+		if apierrors.IsNotFound(err) {
+			// The destination pod churned away before this sync cycle; expected
+			// and self-correcting, so keep it to the debug trace to avoid spam.
+			r.logger.V(1).Info(
+				"Destination pod for ALLOW-miss violation no longer exists, cannot correlate",
+				"destNamespace", dstNamespace,
+				"destPod", dstPod,
+			)
+		} else {
+			r.logger.Error(err, "Failed to fetch destination pod for ALLOW-miss violation",
+				"destNamespace", dstNamespace,
+				"destPod", dstPod,
+			)
+		}
+		return types.NamespacedName{}, false
+	}
+
+	podLabels := labels.Set(pod.Labels)
+
+	// Collect every WNP in the pod's namespace whose selector matches, sorted for
+	// deterministic selection. A WNP is 1:1 with a workload (RFC 0003), so a
+	// single match is expected; more than one means overlapping selectors.
+	var matches []types.NamespacedName
+	for key, wnp := range wnpByKey {
+		if key.Namespace != dstNamespace {
+			continue
+		}
+		selector, ok := wnpPodSelector(wnp)
+		if !ok {
+			continue
+		}
+		sel, err := metav1.LabelSelectorAsSelector(selector)
+		if err != nil {
+			r.logger.Error(err, "Invalid selector on WorkloadNetworkPolicy", "policy", key.String())
+			continue
+		}
+		if sel.Empty() {
+			// An empty selector matches every pod. Treating it as a match would
+			// let a mis-configured WNP capture ALLOW-miss violations for unrelated
+			// workloads in the namespace, so skip it and never correlate by it.
+			r.logger.Info(
+				"WorkloadNetworkPolicy has an empty selector; skipping for ALLOW-miss correlation",
+				"policy", key.String(),
+			)
+			continue
+		}
+		if sel.Matches(podLabels) {
+			matches = append(matches, key)
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		r.logger.Info(
+			"No WorkloadNetworkPolicy selects the ALLOW-miss violation destination pod",
+			"destNamespace", dstNamespace,
+			"destPod", dstPod,
+		)
+		return types.NamespacedName{}, false
+	case 1:
+		return matches[0], true
+	default:
+		sort.Slice(matches, func(i, j int) bool { return matches[i].String() < matches[j].String() })
+		r.logger.Info(
+			"Multiple WorkloadNetworkPolicies select the ALLOW-miss violation destination pod; using the first",
+			"destNamespace", dstNamespace,
+			"destPod", dstPod,
+			"selected", matches[0].String(),
+		)
+		return matches[0], true
+	}
+}
+
+// wnpPodSelector returns the pod/workload label selector for a WorkloadNetworkPolicy
+// and whether one is available for its backend.
+func wnpPodSelector(wnp *securityv1alpha1.WorkloadNetworkPolicy) (*metav1.LabelSelector, bool) {
+	switch wnp.Spec.Backend {
+	case securityv1alpha1.PolicyBackendIstio:
+		if wnp.Spec.Istio != nil {
+			return &wnp.Spec.Istio.Selector, true
+		}
+	case securityv1alpha1.PolicyBackendKubernetes:
+		if wnp.Spec.Kubernetes != nil {
+			return &wnp.Spec.Kubernetes.PodSelector, true
+		}
+	}
+	return nil, false
 }
 
 // convertProtoViolation converts a protobuf ViolationRecord to the API type.

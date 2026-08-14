@@ -116,11 +116,11 @@ func TestLuaScript(t *testing.T) {
 				},
 			},
 			expectedOtelEvent: map[string]string{
-				eventTypeKey:         eventTypeViolation,
+				eventTypeKey:         eventTypeProtect,
 				dstNamespacedNameKey: "default/http-server-7bbf596dd9-8gs65",
 				policyKey:            "default/deny-http-server",
 				srcAddrKey:           "10.244.0.9:46266",
-				bodyKey:              eventTypeViolation,
+				bodyKey:              eventTypeProtect,
 			},
 		},
 		{
@@ -139,11 +139,11 @@ func TestLuaScript(t *testing.T) {
 				},
 			},
 			expectedOtelEvent: map[string]string{
-				eventTypeKey:         eventTypeViolation,
+				eventTypeKey:         eventTypeProtect,
 				dstNamespacedNameKey: "default/http-server-7bbf596dd9-8gs65",
 				policyKey:            "",
 				srcAddrKey:           "10.244.0.9:46266",
-				bodyKey:              eventTypeViolation,
+				bodyKey:              eventTypeProtect,
 			},
 		},
 		{

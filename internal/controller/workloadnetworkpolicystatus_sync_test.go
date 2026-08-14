@@ -83,6 +83,27 @@ func newCniwatcherPod(name, namespace, nodeName, ip string) *corev1.Pod {
 	}
 }
 
+// newSyncWithObjects builds a status-sync backed by a fake client seeded with
+// the given objects, for tests that resolve destination workloads from Pods.
+func newSyncWithObjects(objs ...client.Object) *WorkloadNetworkPolicyStatusSync {
+	return &WorkloadNetworkPolicyStatusSync{
+		Client: fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(objs...).Build(),
+		logger: ctrl.Log.WithName("test"),
+	}
+}
+
+// labeledPod builds a bare Pod with the given labels, for ALLOW-miss
+// correlation tests that match a destination pod against WNP selectors.
+func labeledPod(namespace, name string, labels map[string]string) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    labels,
+		},
+	}
+}
+
 //nolint:unparam // for now some params always receive the same value
 func newProtoViolation(
 	ts time.Time,
@@ -122,6 +143,10 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 
 	npKey := types.NamespacedName{Namespace: "ns1", Name: "policy-1"}
 	wnpKey := types.NamespacedName{Namespace: "ns1", Name: "policy-1"}
+	// allowMissWNPKey owns the destination workload of an ALLOW-miss violation.
+	// Its name is arbitrary (user-chosen) on purpose: ALLOW-miss correlation must
+	// not depend on the WNP name, only on its selector matching the dest pod.
+	allowMissWNPKey := types.NamespacedName{Namespace: "ns1", Name: "user-named-wnp"}
 	ownedIndex := map[types.NamespacedName]*types.NamespacedName{
 		npKey: &wnpKey,
 	}
@@ -132,13 +157,33 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 				Namespace: wnpKey.Namespace,
 			},
 		},
+		allowMissWNPKey: {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      allowMissWNPKey.Name,
+				Namespace: allowMissWNPKey.Namespace,
+			},
+			Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
+				PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+					Backend: securityv1alpha1.PolicyBackendIstio,
+					Istio: &securityv1alpha1.IstioAuthorizationPolicySpec{
+						Selector: metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "frontend"},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	tests := []struct {
-		name       string
-		sync       *WorkloadNetworkPolicyStatusSync
+		name string
+		sync *WorkloadNetworkPolicyStatusSync
+		// wnpByKey overrides the shared default when non-nil, for cases that need
+		// a bespoke set of WorkloadNetworkPolicies (e.g. empty or overlapping
+		// selectors, Kubernetes backend).
+		wnpByKey   map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy
 		violations []*agentv1.ViolationRecord
 		check      func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord)
 	}{
@@ -243,6 +288,241 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			},
 		},
 		{
+			// ALLOW-miss: no denying policy name. The destination pod carries the
+			// labels selected by the arbitrarily-named WNP, so the violation is
+			// attributed to it purely by selector match (not by name).
+			name: "attributes_allow_miss_to_WNP_by_dest_selector",
+			sync: newSyncWithObjects(labeledPod(
+				allowMissWNPKey.Namespace,
+				"frontend-abc123-xyz",
+				map[string]string{"app": "frontend"},
+			)),
+			violations: []*agentv1.ViolationRecord{
+				newProtoViolation(
+					ts,
+					"node-1",
+					string(networkingv1.PolicyTypeIngress),
+					"src-ns",
+					"src-app",
+					allowMissWNPKey.Namespace,
+					"frontend-abc123-xyz",
+					"",
+					"",
+				),
+			},
+			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
+				require.Len(t, result, 1)
+				require.Contains(t, result, allowMissWNPKey)
+				require.Len(t, result[allowMissWNPKey], 1)
+				require.Empty(t, result[allowMissWNPKey][0].DenyingPolicyName)
+			},
+		},
+		{
+			// The destination pod cannot be found, so its labels are unknown and
+			// the violation is dropped.
+			name: "drops_allow_miss_when_dest_pod_unresolvable",
+			sync: newSyncWithObjects(),
+			violations: []*agentv1.ViolationRecord{
+				newProtoViolation(
+					ts,
+					"node-1",
+					string(networkingv1.PolicyTypeIngress),
+					"src-ns",
+					"src-app",
+					allowMissWNPKey.Namespace,
+					"missing-pod",
+					"",
+					"",
+				),
+			},
+			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
+				require.Empty(t, result)
+			},
+		},
+		{
+			// The destination pod exists but its labels match no WNP selector, so
+			// the violation has nowhere to go.
+			name: "drops_allow_miss_when_no_WNP_selects_pod",
+			sync: newSyncWithObjects(labeledPod(
+				allowMissWNPKey.Namespace,
+				"orphan-abc123-xyz",
+				map[string]string{"app": "other"},
+			)),
+			violations: []*agentv1.ViolationRecord{
+				newProtoViolation(
+					ts,
+					"node-1",
+					string(networkingv1.PolicyTypeIngress),
+					"src-ns",
+					"src-app",
+					allowMissWNPKey.Namespace,
+					"orphan-abc123-xyz",
+					"",
+					"",
+				),
+			},
+			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
+				require.Empty(t, result)
+			},
+		},
+		{
+			// An ALLOW-miss with no destination workload at all cannot be
+			// correlated and is dropped.
+			name: "drops_allow_miss_when_dest_workload_missing",
+			sync: newSyncWithObjects(),
+			violations: []*agentv1.ViolationRecord{
+				newProtoViolation(
+					ts,
+					"node-1",
+					string(networkingv1.PolicyTypeIngress),
+					"src-ns",
+					"src-app",
+					"",
+					"",
+					"",
+					"",
+				),
+			},
+			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
+				require.Empty(t, result)
+			},
+		},
+		{
+			// ALLOW-miss correlation also works for the Kubernetes backend, which
+			// exposes its selector via Spec.Kubernetes.PodSelector.
+			name: "attributes_allow_miss_to_kubernetes_backend_WNP",
+			sync: newSyncWithObjects(labeledPod(
+				"ns1",
+				"backend-pod",
+				map[string]string{"app": "backend"},
+			)),
+			wnpByKey: map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy{
+				{Namespace: "ns1", Name: "k8s-wnp"}: {
+					ObjectMeta: metav1.ObjectMeta{Name: "k8s-wnp", Namespace: "ns1"},
+					Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
+						PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+							Backend: securityv1alpha1.PolicyBackendKubernetes,
+							Kubernetes: &networkingv1.NetworkPolicySpec{
+								PodSelector: metav1.LabelSelector{
+									MatchLabels: map[string]string{"app": "backend"},
+								},
+							},
+						},
+					},
+				},
+			},
+			violations: []*agentv1.ViolationRecord{
+				newProtoViolation(
+					ts,
+					"node-1",
+					string(networkingv1.PolicyTypeIngress),
+					"src-ns",
+					"src-app",
+					"ns1",
+					"backend-pod",
+					"",
+					"",
+				),
+			},
+			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
+				require.Len(t, result, 1)
+				require.Contains(t, result, types.NamespacedName{Namespace: "ns1", Name: "k8s-wnp"})
+			},
+		},
+		{
+			// A WNP with an empty selector matches every pod under
+			// LabelSelectorAsSelector; it must NOT capture ALLOW-miss violations for
+			// unrelated workloads, so the violation is dropped.
+			name: "drops_allow_miss_when_only_WNP_has_empty_selector",
+			sync: newSyncWithObjects(labeledPod(
+				"ns1",
+				"some-pod",
+				map[string]string{"app": "whatever"},
+			)),
+			wnpByKey: map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy{
+				{Namespace: "ns1", Name: "catch-all-wnp"}: {
+					ObjectMeta: metav1.ObjectMeta{Name: "catch-all-wnp", Namespace: "ns1"},
+					Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
+						PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+							Backend: securityv1alpha1.PolicyBackendIstio,
+							Istio:   &securityv1alpha1.IstioAuthorizationPolicySpec{},
+						},
+					},
+				},
+			},
+			violations: []*agentv1.ViolationRecord{
+				newProtoViolation(
+					ts,
+					"node-1",
+					string(networkingv1.PolicyTypeIngress),
+					"src-ns",
+					"src-app",
+					"ns1",
+					"some-pod",
+					"",
+					"",
+				),
+			},
+			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
+				require.Empty(t, result)
+			},
+		},
+		{
+			// When more than one WNP selects the destination pod, selection is
+			// deterministic: the keys are sorted and the first is chosen.
+			name: "attributes_allow_miss_to_first_of_multiple_matching_WNPs",
+			sync: newSyncWithObjects(labeledPod(
+				"ns1",
+				"multi-pod",
+				map[string]string{"app": "multi"},
+			)),
+			wnpByKey: map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy{
+				{Namespace: "ns1", Name: "bbb-wnp"}: {
+					ObjectMeta: metav1.ObjectMeta{Name: "bbb-wnp", Namespace: "ns1"},
+					Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
+						PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+							Backend: securityv1alpha1.PolicyBackendIstio,
+							Istio: &securityv1alpha1.IstioAuthorizationPolicySpec{
+								Selector: metav1.LabelSelector{
+									MatchLabels: map[string]string{"app": "multi"},
+								},
+							},
+						},
+					},
+				},
+				{Namespace: "ns1", Name: "aaa-wnp"}: {
+					ObjectMeta: metav1.ObjectMeta{Name: "aaa-wnp", Namespace: "ns1"},
+					Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
+						PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+							Backend: securityv1alpha1.PolicyBackendIstio,
+							Istio: &securityv1alpha1.IstioAuthorizationPolicySpec{
+								Selector: metav1.LabelSelector{
+									MatchLabels: map[string]string{"app": "multi"},
+								},
+							},
+						},
+					},
+				},
+			},
+			violations: []*agentv1.ViolationRecord{
+				newProtoViolation(
+					ts,
+					"node-1",
+					string(networkingv1.PolicyTypeIngress),
+					"src-ns",
+					"src-app",
+					"ns1",
+					"multi-pod",
+					"",
+					"",
+				),
+			},
+			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
+				require.Len(t, result, 1)
+				require.Contains(t, result, types.NamespacedName{Namespace: "ns1", Name: "aaa-wnp"})
+			},
+		},
+		{
 			name: "dedup_by_violation_key",
 			sync: &WorkloadNetworkPolicyStatusSync{},
 			violations: []*agentv1.ViolationRecord{
@@ -281,7 +561,11 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := tt.sync.correlateViolationsToWNPs(tt.violations, ownedIndex, wnpByKey)
+			wnps := wnpByKey
+			if tt.wnpByKey != nil {
+				wnps = tt.wnpByKey
+			}
+			result := tt.sync.correlateViolationsToWNPs(context.Background(), tt.violations, ownedIndex, wnps)
 			tt.check(t, result)
 		})
 	}

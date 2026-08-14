@@ -1,6 +1,6 @@
 -- Consts
 local EVT_MONITOR = "monitor"
-local EVT_VIOLATION = "violation"
+local EVT_PROTECT = "protect"
 local EVT_LEARN = "learn"
 local DIRECTION_INBOUND = "inbound"
 local MSG_LEARN = "connection complete"
@@ -32,8 +32,8 @@ local function extract_port(address)
   return port
 end
 
--- Monitor dry-run and protect enforcement (violation) events share the same
--- plumbing and attribution rules: they only differ in the `evt.type` tag.
+-- Monitor dry-run and protect enforcement events share the same plumbing and
+-- attribution rules: they only differ in the `evt.type` tag.
 local function to_policy_event(timestamp, record, evt_type)
   local proxy = record["proxy"] or {}
   local inbound = record["inbound"] or {}
@@ -91,7 +91,7 @@ function to_otel(tag, timestamp, record)
   -- an ALLOW-miss is recorded without a policy name. Allowed flows
   -- ("no allow policies, allow", "allow policy match") are not violations.
   if message == MSG_VIOLATION_DENY or message == MSG_VIOLATION_ALLOW_MISS then
-    return to_policy_event(timestamp, record, EVT_VIOLATION)
+    return to_policy_event(timestamp, record, EVT_PROTECT)
   end
 
   if message == MSG_LEARN then
