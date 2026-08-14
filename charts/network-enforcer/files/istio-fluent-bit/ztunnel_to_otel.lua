@@ -3,8 +3,15 @@ local EVT_MONITOR = "monitor"
 local EVT_VIOLATION = "violation"
 local EVT_LEARN = "learn"
 local DIRECTION_INBOUND = "inbound"
-local MSG_MONITOR_PREFIX = "^dry%-run:"
 local MSG_LEARN = "connection complete"
+-- Monitor (dry-run) rejection messages from ztunnel state logs. These mirror the
+-- protect-mode messages below but are prefixed `dry-run:` and use the present
+-- tense ("match" vs "matched"). Allowed dry-run flows (e.g. "dry-run: allow
+-- policy match", "dry-run: no allow policies, allow") are NOT rejections and must
+-- not be matched here, so we match the two rejection messages exactly rather than
+-- by a bare `^dry-run:` prefix.
+local MSG_MONITOR_DENY = "dry-run: deny policy match"
+local MSG_MONITOR_ALLOW_MISS = "dry-run: no allow policies match"
 -- Enforcement (protect mode) rejection messages from ztunnel state logs
 local MSG_VIOLATION_DENY = "deny policy match"
 local MSG_VIOLATION_ALLOW_MISS = "no allow policies matched"
@@ -73,8 +80,10 @@ end
 function to_otel(tag, timestamp, record)
   local message = record["message"]
 
-  -- Monitor dry-run events: the log message starts with `dry-run:`
-  if string.find(message or "", MSG_MONITOR_PREFIX) then
+  -- Monitor dry-run rejections: mirror the protect-mode branch below, but for
+  -- the `dry-run:`-prefixed messages. Allowed dry-run flows are not rejections
+  -- and are intentionally excluded.
+  if message == MSG_MONITOR_DENY or message == MSG_MONITOR_ALLOW_MISS then
     return to_policy_event(timestamp, record, EVT_MONITOR)
   end
 

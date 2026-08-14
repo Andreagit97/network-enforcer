@@ -74,6 +74,33 @@ func TestLuaScript(t *testing.T) {
 			expectedOtelEvent: nil,
 		},
 		{
+			// Monitor dry-run allowed flow via an explicit ALLOW match: the
+			// message is `dry-run:`-prefixed but it is not a rejection, so it
+			// must be dropped (mirrors the protect-mode allowed case).
+			name: "monitor_allowed_by_policy_match",
+			record: map[string]any{
+				"message": "dry-run: allow policy match",
+				"policy":  "default/allow-http-server-monitor",
+				"proxy": map[string]any{
+					"wl": "default/http-server-7bbf596dd9-8gs65",
+				},
+			},
+			expectedOtelEvent: nil,
+		},
+		{
+			// Monitor dry-run allowed flow when no allow policies exist at all:
+			// permitted, so it must be dropped and not confused with the
+			// ALLOW-miss rejection ("dry-run: no allow policies match").
+			name: "monitor_allowed_no_policies",
+			record: map[string]any{
+				"message": "dry-run: no allow policies, allow",
+				"proxy": map[string]any{
+					"wl": "default/http-server-7bbf596dd9-8gs65",
+				},
+			},
+			expectedOtelEvent: nil,
+		},
+		{
 			// Protect enforcement: an explicit DENY match carries the policy name.
 			// {"level":"info","scope":"ztunnel::state","message":"deny policy match","policy":"default/deny-http-server","proxy":{"wl":"default/http-server-7bbf596dd9-8gs65"},"inbound":{"id":"...","peer":"10.244.0.9:46266"}}
 			name: "violation_deny_policy",
