@@ -16,12 +16,6 @@ const (
 	defaultNamespacePref           = "network-enforcer-e2e"
 	defaultKindConfigPath          = "./clusters/istio.yaml"
 	defaultWnpStatusUpdateInterval = 3 * time.Second // we reduce the time here to have faster feedback from the controller
-
-	// Istio ambient mesh install (official Istio Helm charts).
-	istioRepoURL       = "https://istio-release.storage.googleapis.com/charts"
-	istioRepoLocalName = defaultNamespacePref + "-istio"
-	istioNamespace     = "istio-system"
-	istioChartVersion  = "1.30.3"
 )
 
 const (
@@ -34,6 +28,9 @@ const (
 	installClusterOnlyEnvVar = "E2E_INSTALL_CLUSTER_ONLY"
 	// set to "true" to skip cluster creation, image loading, and cluster destroy.
 	useExistingClusterEnvVar = "E2E_USE_EXISTING_CLUSTER"
+	// selects the data-plane provider to set up (currently only "istio";
+	// calico and cilium will be added back as first-class providers).
+	providerEnvVar = "E2E_PROVIDER"
 	// comma-separated list of optional dependencies to install: "istio", "cert-manager".
 	// Empty/unset means all. "none" means none.
 	e2eDependenciesEnvVar = "E2E_DEPENDENCIES"
@@ -47,6 +44,7 @@ type suiteConfig struct {
 	releaseNS               string
 	controllerImage         string
 	namespacePrefix         string
+	provider                string
 	wnpStatusUpdateInterval time.Duration
 	installClusterOnly      string
 	useExistingCluster      bool
@@ -64,6 +62,7 @@ func loadSuiteConfig() suiteConfig {
 		controllerImage:         defaultControllerImage,
 		namespacePrefix:         defaultNamespacePref,
 		kindConfigPath:          defaultKindConfigPath,
+		provider:                readEnvOrDefault(providerEnvVar, istioProvider),
 		wnpStatusUpdateInterval: defaultWnpStatusUpdateInterval,
 		installClusterOnly:      readEnvOrDefault(installClusterOnlyEnvVar, ""),
 		useExistingCluster:      readEnvOrDefault(useExistingClusterEnvVar, "") != "",

@@ -1,42 +1,44 @@
-# todo!: re-enable e2e-tests when we are ready
-# name: E2E Tests
+name: E2E Tests
 
-# on:
-#   push:
-#     branches: ["main"]
-#   pull_request:
+on:
+  push:
+    branches: ["main"]
+  pull_request:
 
-# jobs:
-#   test-e2e:
-#     permissions:
-#       contents: read
-#     strategy:
-#       fail-fast: false
-#       matrix:
-#         arch: [amd64, arm64]
-#         cni: [cilium, calico]
-#         include:
-#           - arch: amd64
-#             runner: ubuntu-latest
-#           - arch: arm64
-#             runner: ubuntu-24.04-arm
-#     name: E2E test (${{ matrix.arch }}, ${{ matrix.cni }})
-#     runs-on: ${{ matrix.runner }}
-#     steps:
-#       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-#         with:
-#           persist-credentials: false
-#       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-#         with:
-#           go-version-file: "go.mod"
-#       - name: Running Test e2e
-#         run: |
-#           make test-e2e E2E_CNI=${{ matrix.cni }}
-#       - name: Upload cluster logs
-#         if: failure()
-#         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-#         with:
-#           name: e2e-test-cluster-logs-${{ matrix.arch }}-${{ matrix.cni }}
-#           path: test/e2e/logs
-#           if-no-files-found: error
-#           retention-days: 7
+permissions:
+  contents: read
+
+jobs:
+  test-e2e:
+    permissions:
+      contents: read
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    name: E2E test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: "go.mod"
+      - name: Running Test e2e
+        run: |
+          make test-e2e
+      - name: Upload cluster logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-test-cluster-logs-${{ matrix.arch }}
+          path: test/e2e/logs
+          if-no-files-found: error
+          retention-days: 7

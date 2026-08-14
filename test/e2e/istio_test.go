@@ -19,7 +19,6 @@ import (
 	"sigs.k8s.io/e2e-framework/third_party/helm"
 
 	"github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,12 +26,37 @@ import (
 // the workloads created in it afterwards) in the Istio ambient mesh.
 const ambientNamespaceLabel = "istio.io/dataplane-mode"
 
+// istioProvider selects the Istio ambient data-plane provider.
+const istioProvider = "istio"
+
+// Istio ambient mesh install (official Istio Helm charts).
+const (
+	istioRepoURL       = "https://istio-release.storage.googleapis.com/charts"
+	istioRepoLocalName = defaultNamespacePref + "-istio"
+	istioNamespace     = "istio-system"
+	istioChartVersion  = "1.30.3"
+)
+
 // istioChartInstall describes a single Helm chart that is part of the Istio
 // ambient mesh install.
 type istioChartInstall struct {
 	releaseName string
 	chart       string
 	args        []string
+}
+
+// installProviderMesh sets up the data-plane provider selected via
+// E2E_PROVIDER. Only the Istio provider is supported today; calico and cilium
+// will be added back as first-class providers.
+func installProviderMesh() env.Func {
+	return func(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
+		switch getSuiteConfig(ctx).provider {
+		case istioProvider:
+			return installIstioMesh()(ctx, cfg)
+		default:
+			return ctx, fmt.Errorf("unsupported provider: %q", getSuiteConfig(ctx).provider)
+		}
+	}
 }
 
 // installIstioMesh installs an Istio ambient mesh using the official Istio
@@ -77,8 +101,6 @@ func installIstioMesh() env.Func {
 				chart:       istioRepoLocalName + "/cni",
 				args: []string{
 					"--set", "profile=ambient",
-					// kind only enables IPv4, so we must skip the ambient IPv6 setup
-					"--set", "cni.ambient.ipv6=false",
 				},
 			},
 			{
@@ -222,28 +244,31 @@ func assessIstioProposalGenerated(ctx context.Context, t *testing.T, _ *envconf.
 	}
 
 	var proposal v1alpha1.WorkloadNetworkPolicyProposal
-	require.EventuallyWithT(t, func(c *assert.CollectT) {
+	require.Eventually(t, func() bool {
 		err := getSecurityV1Alpha1Client(ctx).WithNamespace(namespace).
 			Get(ctx, expected.Name, namespace, &proposal)
-		if !assert.NoError(c, err, "expected Istio ingress proposal %q was not generated", expected.Name) {
-			return
+		if err == nil {
+			return true
 		}
-		assert.Equal(c, expected.Spec.Backend, proposal.Spec.Backend, "proposal backend does not match expected")
-		if assert.NotNil(c, proposal.Spec.Istio, "proposal has no Istio backend spec") {
-			assert.Equal(
-				c,
-				expected.Spec.Istio.Selector,
-				proposal.Spec.Istio.Selector,
-				"proposal selector does not match expected",
-			)
-			assert.ElementsMatch(
-				c,
-				expected.Spec.Istio.Rules,
-				proposal.Spec.Istio.Rules,
-				"proposal rules do not match expected",
-			)
-		}
-	}, defaultOperationTimeout, 3*time.Second, "expected Istio ingress proposal was not generated")
+		t.Logf("Istio ingress proposal %q not available yet: %v", expected.Name, err)
+		return false
+	}, defaultOperationTimeout, 3*time.Second,
+		"expected Istio ingress proposal %q was not generated", expected.Name)
+
+	require.Equal(t, expected.Spec.Backend, proposal.Spec.Backend, "proposal backend does not match expected")
+	require.NotNil(t, proposal.Spec.Istio, "proposal has no Istio backend spec")
+	require.Equal(
+		t,
+		expected.Spec.Istio.Selector,
+		proposal.Spec.Istio.Selector,
+		"proposal selector does not match expected",
+	)
+	require.ElementsMatch(
+		t,
+		expected.Spec.Istio.Rules,
+		proposal.Spec.Istio.Rules,
+		"proposal rules do not match expected",
+	)
 
 	return ctx
 }

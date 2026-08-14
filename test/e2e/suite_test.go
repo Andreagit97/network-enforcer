@@ -75,7 +75,7 @@ func TestMain(m *testing.M) {
 	// Optional dependencies, controlled by E2E_DEPENDENCIES.
 	// Default (empty/unset): both are installed. Set "none" to skip all.
 	if testSuiteConf.HasE2EDependency("istio") {
-		setupFuncs = append(setupFuncs, installIstioMesh())
+		setupFuncs = append(setupFuncs, installProviderMesh())
 	}
 	if testSuiteConf.HasE2EDependency("cert-manager") {
 		setupFuncs = append(setupFuncs, installCertManager())
