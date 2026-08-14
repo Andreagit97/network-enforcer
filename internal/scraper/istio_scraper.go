@@ -14,7 +14,6 @@ import (
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
-	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
 	otellog "go.opentelemetry.io/otel/log"
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -54,7 +53,7 @@ const (
 
 // IstioScraperConfig configures IstioScraper.
 type IstioScraperConfig struct {
-	ViolationBuffer      *violationbuf.Buffer
+	ViolationBuffer      *violation.Buffer
 	EnqueueLearningEvent LearningEnqueueFunc
 	Logger               *slog.Logger
 	ViolationOtelLogger  otellog.Logger
@@ -243,8 +242,8 @@ func policyEventToObservation(
 
 // observationToBufferRecord maps the in-flight observation into the shared
 // violation buffer shape consumed by the status sync.
-func observationToBufferRecord(obs violation.Observation) violationbuf.ViolationRecord {
-	return violationbuf.ViolationRecord{
+func observationToBufferRecord(obs violation.Observation) violation.ViolationRecord {
+	return violation.ViolationRecord{
 		Timestamp: obs.Timestamp.Time,
 		// These records are produced on the destination ztunnel for inbound
 		// connections, so the direction is always ingress.

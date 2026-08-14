@@ -1,7 +1,4 @@
-// Package violationbuf provides a thread-safe ring buffer for network violation
-// records. It is used by the cniwatcher to buffer per-node deny events locally
-// and hand them out on demand via gRPC ScrapeViolations.
-package violationbuf
+package violation
 
 import (
 	"sync"
@@ -13,6 +10,8 @@ import (
 )
 
 // ViolationRecord is a network-flavoured violation record ready for scraping.
+//
+//nolint:revive // we will cleanup this one in a follow-up commit
 type ViolationRecord struct {
 	Timestamp time.Time
 	NodeName  string

@@ -8,7 +8,7 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
-	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
+	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	"github.com/stretchr/testify/require"
 	otellog "go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/embedded"
@@ -33,7 +33,7 @@ func (f *fakeOtelEventLogger) Emit(_ context.Context, rec otellog.Record) {
 
 func testScraper(
 	enqueue LearningEnqueueFunc,
-	buffer *violationbuf.Buffer,
+	buffer *violation.Buffer,
 	logger otellog.Logger,
 ) *IstioScraper {
 	return NewIstioScraper(IstioScraperConfig{
@@ -85,7 +85,7 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 		wantLearned *types.LearningEvent
 		// wantRecord is the violation buffer record expected, or nil when the
 		// record must not reach the buffer.
-		wantRecord *violationbuf.ViolationRecord
+		wantRecord *violation.ViolationRecord
 		// wantOtel is the number of policy_violation_observed OTel logs emitted.
 		wantOtel int
 	}{
@@ -114,7 +114,7 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 				policyKey:            "default/deny-http-server-monitor",
 				srcAddrKey:           "10.244.0.9:46266",
 			},
-			wantRecord: &violationbuf.ViolationRecord{
+			wantRecord: &violation.ViolationRecord{
 				Timestamp:              wantTimestamp,
 				Direction:              networkingv1.PolicyTypeIngress,
 				SrcName:                "10.244.0.9:46266",
@@ -135,7 +135,7 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 				policyKey:            "default/deny-http-server-protect",
 				srcAddrKey:           "10.244.0.5:49084",
 			},
-			wantRecord: &violationbuf.ViolationRecord{
+			wantRecord: &violation.ViolationRecord{
 				Timestamp:              wantTimestamp,
 				Direction:              networkingv1.PolicyTypeIngress,
 				SrcName:                "10.244.0.5:49084",
@@ -155,7 +155,7 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 				dstNamespacedNameKey: "default/http-server-6cbcc86f5d-lhq82",
 				srcAddrKey:           "10.244.0.5:52814",
 			},
-			wantRecord: &violationbuf.ViolationRecord{
+			wantRecord: &violation.ViolationRecord{
 				Timestamp:    wantTimestamp,
 				Direction:    networkingv1.PolicyTypeIngress,
 				SrcName:      "10.244.0.5:52814",
@@ -180,7 +180,7 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 			t.Parallel()
 
 			learned := make([]types.LearningEvent, 0)
-			buffer := violationbuf.NewBuffer()
+			buffer := violation.NewBuffer()
 			otelLogger := &fakeOtelEventLogger{}
 
 			scraper := testScraper(
@@ -203,7 +203,7 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 
 			drained := buffer.Drain()
 			if tc.wantRecord != nil {
-				require.Equal(t, []violationbuf.ViolationRecord{*tc.wantRecord}, drained)
+				require.Equal(t, []violation.ViolationRecord{*tc.wantRecord}, drained)
 			} else {
 				require.Empty(t, drained)
 			}

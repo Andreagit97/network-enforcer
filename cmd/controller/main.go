@@ -45,7 +45,7 @@ import (
 	"github.com/rancher-sandbox/network-enforcer/internal/controller"
 	"github.com/rancher-sandbox/network-enforcer/internal/events"
 	"github.com/rancher-sandbox/network-enforcer/internal/scraper"
-	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
+	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -239,7 +239,7 @@ func run(logger *slog.Logger, conf *config) error {
 	}
 
 	// Create the violation ring buffer shared
-	monitorViolationBuffer := violationbuf.NewBuffer()
+	violationBuffer := violation.NewBuffer()
 
 	learningReconciler := controller.NewLearningReconciler(mgr.GetClient())
 	if err = learningReconciler.SetupWithManager(mgr); err != nil {
@@ -248,7 +248,7 @@ func run(logger *slog.Logger, conf *config) error {
 
 	// todo!: Here the controller should know the cni to understand which scraper we need to run. At the moment we suppose we are always on Istio.
 	istioScraper := scraper.NewIstioScraper(scraper.IstioScraperConfig{
-		ViolationBuffer:      monitorViolationBuffer,
+		ViolationBuffer:      violationBuffer,
 		EnqueueLearningEvent: learningReconciler.GetEnqueueFunc(),
 		ViolationOtelLogger:  eventLogger,
 		Logger:               logger.With("component", "istio-scraper"),
@@ -261,7 +261,7 @@ func run(logger *slog.Logger, conf *config) error {
 		return fmt.Errorf("unable to add istio scraper to manager: %w", err)
 	}
 
-	if err = setupControllers(ctx, logger, mgr, conf, eventLogger, monitorViolationBuffer); err != nil {
+	if err = setupControllers(ctx, logger, mgr, conf, eventLogger, violationBuffer); err != nil {
 		return err
 	}
 
@@ -282,7 +282,7 @@ func setupControllers(
 	mgr manager.Manager,
 	conf *config,
 	eventLogger otellog.Logger,
-	monitorViolationBuffer *violationbuf.Buffer,
+	violationBuffer *violation.Buffer,
 ) error {
 	if err := (&controller.WorkloadNetworkPolicyReconciler{
 		Client: mgr.GetClient(),
@@ -305,7 +305,7 @@ func setupControllers(
 	// }
 
 	conf.wnpStatusSyncConfig.EventLogger = eventLogger
-	conf.wnpStatusSyncConfig.MonitorViolationBuffer = monitorViolationBuffer
+	conf.wnpStatusSyncConfig.ViolationBuffer = violationBuffer
 	logger.InfoContext(ctx, "Setting up WorkloadNetworkPolicyStatusSync with",
 		"config", conf.wnpStatusSyncConfig)
 	wnpStatusSync, err := controller.NewWorkloadNetworkPolicyStatusSync(

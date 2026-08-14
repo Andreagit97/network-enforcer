@@ -1,20 +1,19 @@
-package violationbuf_test
+package violation
 
 import (
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 )
 
 func TestBufferRecordAndDrain(t *testing.T) {
-	buf := violationbuf.NewBuffer()
+	buf := NewBuffer()
 
-	buf.Record(violationbuf.ViolationRecord{
+	buf.Record(ViolationRecord{
 		Direction:              networkingv1.PolicyTypeEgress,
 		SrcNamespace:           "ns1",
 		SrcName:                "pod1",
@@ -39,11 +38,11 @@ func TestBufferRecordAndDrain(t *testing.T) {
 }
 
 func TestBufferOverwritesOldest(t *testing.T) {
-	buf := violationbuf.NewBuffer()
+	buf := NewBuffer()
 
 	// Fill the buffer to capacity.
-	for i := range violationbuf.MaxBufferEntries {
-		dropped := buf.Record(violationbuf.ViolationRecord{
+	for i := range MaxBufferEntries {
+		dropped := buf.Record(ViolationRecord{
 			SrcName:   fmt.Sprintf("pod-%d", i),
 			Action:    "protect",
 			Direction: networkingv1.PolicyTypeEgress,
@@ -53,7 +52,7 @@ func TestBufferOverwritesOldest(t *testing.T) {
 	}
 
 	// Add one more — should overwrite the oldest (pod-0).
-	dropped := buf.Record(violationbuf.ViolationRecord{
+	dropped := buf.Record(ViolationRecord{
 		SrcName:   "pod-overflow",
 		Action:    "protect",
 		Direction: networkingv1.PolicyTypeEgress,
@@ -62,7 +61,7 @@ func TestBufferOverwritesOldest(t *testing.T) {
 	require.True(t, dropped, "should report a drop when buffer overflows")
 
 	records := buf.Drain()
-	require.Len(t, records, violationbuf.MaxBufferEntries)
+	require.Len(t, records, MaxBufferEntries)
 
 	// Newest should be pod-overflow (first in newest-to-oldest order).
 	require.Equal(t, "pod-overflow", records[0].SrcName)
@@ -71,11 +70,11 @@ func TestBufferOverwritesOldest(t *testing.T) {
 }
 
 func TestBufferDrainReverseChronologicalOrder(t *testing.T) {
-	buf := violationbuf.NewBuffer()
+	buf := NewBuffer()
 
 	baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := range 5 {
-		buf.Record(violationbuf.ViolationRecord{
+		buf.Record(ViolationRecord{
 			Timestamp: baseTime.Add(time.Duration(i) * time.Second),
 			SrcName:   fmt.Sprintf("pod-%d", i),
 			Action:    "protect",
@@ -91,12 +90,12 @@ func TestBufferDrainReverseChronologicalOrder(t *testing.T) {
 }
 
 func TestBufferDrainAfterOverflow(t *testing.T) {
-	buf := violationbuf.NewBuffer()
+	buf := NewBuffer()
 
-	totalRecords := violationbuf.MaxBufferEntries + 50
+	totalRecords := MaxBufferEntries + 50
 
 	for i := range totalRecords {
-		buf.Record(violationbuf.ViolationRecord{
+		buf.Record(ViolationRecord{
 			SrcName:   fmt.Sprintf("pod-%d", i),
 			Action:    "protect",
 			Direction: networkingv1.PolicyTypeEgress,
@@ -104,7 +103,7 @@ func TestBufferDrainAfterOverflow(t *testing.T) {
 	}
 
 	records := buf.Drain()
-	require.Len(t, records, violationbuf.MaxBufferEntries)
+	require.Len(t, records, MaxBufferEntries)
 
 	// The oldest 50 entries (pod-0 through pod-49) were overwritten.
 	// Records should be in reverse chronological order: pod-(totalRecords-1), ..., pod-50.
@@ -123,14 +122,14 @@ func TestBufferDrainAfterOverflow(t *testing.T) {
 }
 
 func TestConcurrentRecordAndDrain(_ *testing.T) {
-	buf := violationbuf.NewBuffer()
+	buf := NewBuffer()
 
 	done := make(chan struct{})
 
 	// Concurrently record.
 	go func() {
 		for i := range 1000 {
-			buf.Record(violationbuf.ViolationRecord{
+			buf.Record(ViolationRecord{
 				SrcName:   fmt.Sprintf("pod-%d", i),
 				Action:    "protect",
 				Direction: networkingv1.PolicyTypeEgress,

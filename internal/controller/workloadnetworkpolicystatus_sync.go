@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/rancher-sandbox/network-enforcer/internal/types/loglevel"
+	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	otellog "go.opentelemetry.io/otel/log"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	corev1 "k8s.io/api/core/v1"
@@ -24,7 +25,6 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/grpcexporter"
-	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
 	agentv1 "github.com/rancher-sandbox/network-enforcer/proto/agent/v1"
 )
 
@@ -44,19 +44,19 @@ type AgentClientPoolAPI interface {
 type WorkloadNetworkPolicyStatusSync struct {
 	client.Client
 
-	agentClientPool        AgentClientPoolAPI
-	updateInterval         time.Duration
-	eventLogger            otellog.Logger
-	logger                 logr.Logger
-	monitorViolationBuffer *violationbuf.Buffer
+	agentClientPool AgentClientPoolAPI
+	updateInterval  time.Duration
+	eventLogger     otellog.Logger
+	logger          logr.Logger
+	violationBuffer *violation.Buffer
 }
 
 type WorkloadNetworkPolicyStatusSyncConfig struct {
 	AgentPoolConf  grpcexporter.AgentClientPoolConfig
 	UpdateInterval time.Duration
 	// EventLogger for OTLP policy_violation_acknowledged; nil = disabled.
-	EventLogger            otellog.Logger
-	MonitorViolationBuffer *violationbuf.Buffer
+	EventLogger     otellog.Logger
+	ViolationBuffer *violation.Buffer
 }
 
 func NewWorkloadNetworkPolicyStatusSync(
@@ -68,10 +68,10 @@ func NewWorkloadNetworkPolicyStatusSync(
 	}
 
 	return &WorkloadNetworkPolicyStatusSync{
-		Client:                 c,
-		updateInterval:         config.UpdateInterval,
-		eventLogger:            config.EventLogger,
-		monitorViolationBuffer: config.MonitorViolationBuffer,
+		Client:          c,
+		updateInterval:  config.UpdateInterval,
+		eventLogger:     config.EventLogger,
+		violationBuffer: config.ViolationBuffer,
 	}, nil
 }
 
@@ -95,7 +95,7 @@ func (r *WorkloadNetworkPolicyStatusSync) Start(ctx context.Context) error {
 }
 
 func convertMonitorViolations(
-	monitorViolation []violationbuf.ViolationRecord,
+	monitorViolation []violation.ViolationRecord,
 ) []*agentv1.ViolationRecord {
 	result := make([]*agentv1.ViolationRecord, 0, len(monitorViolation))
 	for _, v := range monitorViolation {
@@ -147,7 +147,7 @@ func (r *WorkloadNetworkPolicyStatusSync) sync(ctx context.Context) error {
 	}
 
 	// monitor violations coming from the topology scraper
-	monitorViolation := convertMonitorViolations(r.monitorViolationBuffer.Drain())
+	monitorViolation := convertMonitorViolations(r.violationBuffer.Drain())
 	// Group scraped violations by the owning WNP
 	violationsByWNP := r.correlateViolationsToWNPs(ctx, monitorViolation, ownedIndex, wnpByKey)
 
