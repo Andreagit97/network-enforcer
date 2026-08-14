@@ -2,38 +2,7 @@ package violation
 
 import (
 	"sync"
-	"time"
-
-	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
-	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 )
-
-// ViolationRecord is a network-flavoured violation record ready for scraping.
-//
-//nolint:revive // we will cleanup this one in a follow-up commit
-type ViolationRecord struct {
-	Timestamp time.Time
-	NodeName  string
-	Direction networkingv1.PolicyType
-
-	SrcNamespace string
-	SrcName      string
-	SrcWorkloads []string
-	SrcLabels    []string
-
-	DstNamespace string
-	DstName      string
-	DstWorkloads []string
-	DstLabels    []string
-
-	Protocol corev1.Protocol
-	DstPort  int32
-	Action   securityv1alpha1.WorkloadNetworkPolicyMode
-
-	DenyingPolicyNamespace string
-	DenyingPolicyName      string
-}
 
 // MaxBufferEntries is the capacity of the ring buffer. When full, the oldest
 // entry is overwritten.
@@ -44,19 +13,19 @@ const MaxBufferEntries = 10_000
 // Drain() when the controller scrapes.
 type Buffer struct {
 	mtx sync.Mutex
-	buf []ViolationRecord
+	buf []Observation
 	pos int
 }
 
 func NewBuffer() *Buffer {
 	return &Buffer{
-		buf: make([]ViolationRecord, MaxBufferEntries),
+		buf: make([]Observation, MaxBufferEntries),
 	}
 }
 
 // Record appends a violation to the ring buffer. If the buffer is full,
 // the oldest entry is overwritten and dropped is returned as true.
-func (b *Buffer) Record(rec ViolationRecord) bool {
+func (b *Buffer) Record(rec Observation) bool {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 
@@ -70,7 +39,7 @@ func (b *Buffer) Record(rec ViolationRecord) bool {
 
 // Drain returns all buffered records in reverse chronological order (newest first)
 // and resets the buffer.
-func (b *Buffer) Drain() []ViolationRecord {
+func (b *Buffer) Drain() []Observation {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 
@@ -79,7 +48,7 @@ func (b *Buffer) Drain() []ViolationRecord {
 		return nil
 	}
 
-	records := make([]ViolationRecord, 0, n)
+	records := make([]Observation, 0, n)
 	for i := range n {
 		idx := (b.pos - 1 - i) % MaxBufferEntries
 		records = append(records, b.buf[idx])

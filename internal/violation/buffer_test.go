@@ -5,30 +5,29 @@ import (
 	"testing"
 	"time"
 
+	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestBufferRecordAndDrain(t *testing.T) {
 	buf := NewBuffer()
 
-	buf.Record(ViolationRecord{
-		Direction:              networkingv1.PolicyTypeEgress,
-		SrcNamespace:           "ns1",
-		SrcName:                "pod1",
-		DstNamespace:           "ns2",
-		DstName:                "svc1",
-		Protocol:               corev1.ProtocolTCP,
-		DstPort:                80,
-		Action:                 "protect",
-		DenyingPolicyName:      "deny-all",
-		DenyingPolicyNamespace: "ns1",
+	buf.Record(Observation{
+		ViolationInfo: securityv1alpha1.ViolationInfo{
+			Source:                 securityv1alpha1.WorkloadRef{Namespace: "ns1", OwnerName: "pod1"},
+			Dest:                   securityv1alpha1.WorkloadRef{Namespace: "ns2", OwnerName: "svc1"},
+			Protocol:               corev1.ProtocolTCP,
+			DstPort:                80,
+			Action:                 securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+			DenyingPolicyName:      "deny-all",
+			DenyingPolicyNamespace: "ns1",
+		},
 	})
 
 	records := buf.Drain()
 	require.Len(t, records, 1)
-	require.Equal(t, networkingv1.PolicyTypeEgress, records[0].Direction)
 	require.Equal(t, "deny-all", records[0].DenyingPolicyName)
 	require.Equal(t, int32(80), records[0].DstPort)
 
@@ -42,21 +41,23 @@ func TestBufferOverwritesOldest(t *testing.T) {
 
 	// Fill the buffer to capacity.
 	for i := range MaxBufferEntries {
-		dropped := buf.Record(ViolationRecord{
-			SrcName:   fmt.Sprintf("pod-%d", i),
-			Action:    "protect",
-			Direction: networkingv1.PolicyTypeEgress,
-			DstPort:   int32(i),
+		dropped := buf.Record(Observation{
+			ViolationInfo: securityv1alpha1.ViolationInfo{
+				Source:  securityv1alpha1.WorkloadRef{OwnerName: fmt.Sprintf("pod-%d", i)},
+				Action:  securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+				DstPort: int32(i),
+			},
 		})
 		require.False(t, dropped, "should not drop while filling buffer")
 	}
 
 	// Add one more — should overwrite the oldest (pod-0).
-	dropped := buf.Record(ViolationRecord{
-		SrcName:   "pod-overflow",
-		Action:    "protect",
-		Direction: networkingv1.PolicyTypeEgress,
-		DstPort:   9999,
+	dropped := buf.Record(Observation{
+		ViolationInfo: securityv1alpha1.ViolationInfo{
+			Source:  securityv1alpha1.WorkloadRef{OwnerName: "pod-overflow"},
+			Action:  securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+			DstPort: 9999,
+		},
 	})
 	require.True(t, dropped, "should report a drop when buffer overflows")
 
@@ -64,9 +65,9 @@ func TestBufferOverwritesOldest(t *testing.T) {
 	require.Len(t, records, MaxBufferEntries)
 
 	// Newest should be pod-overflow (first in newest-to-oldest order).
-	require.Equal(t, "pod-overflow", records[0].SrcName)
+	require.Equal(t, "pod-overflow", records[0].Source.OwnerName)
 	// Oldest should now be pod-1 (pod-0 was overwritten).
-	require.Equal(t, "pod-1", records[len(records)-1].SrcName)
+	require.Equal(t, "pod-1", records[len(records)-1].Source.OwnerName)
 }
 
 func TestBufferDrainReverseChronologicalOrder(t *testing.T) {
@@ -74,18 +75,19 @@ func TestBufferDrainReverseChronologicalOrder(t *testing.T) {
 
 	baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := range 5 {
-		buf.Record(ViolationRecord{
-			Timestamp: baseTime.Add(time.Duration(i) * time.Second),
-			SrcName:   fmt.Sprintf("pod-%d", i),
-			Action:    "protect",
-			Direction: networkingv1.PolicyTypeEgress,
+		buf.Record(Observation{
+			ViolationInfo: securityv1alpha1.ViolationInfo{
+				Timestamp: metav1.NewTime(baseTime.Add(time.Duration(i) * time.Second)),
+				Source:    securityv1alpha1.WorkloadRef{OwnerName: fmt.Sprintf("pod-%d", i)},
+				Action:    securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+			},
 		})
 	}
 
 	records := buf.Drain()
 	require.Len(t, records, 5)
 	for i, rec := range records {
-		require.Equal(t, fmt.Sprintf("pod-%d", 4-i), rec.SrcName)
+		require.Equal(t, fmt.Sprintf("pod-%d", 4-i), rec.Source.OwnerName)
 	}
 }
 
@@ -95,10 +97,11 @@ func TestBufferDrainAfterOverflow(t *testing.T) {
 	totalRecords := MaxBufferEntries + 50
 
 	for i := range totalRecords {
-		buf.Record(ViolationRecord{
-			SrcName:   fmt.Sprintf("pod-%d", i),
-			Action:    "protect",
-			Direction: networkingv1.PolicyTypeEgress,
+		buf.Record(Observation{
+			ViolationInfo: securityv1alpha1.ViolationInfo{
+				Source: securityv1alpha1.WorkloadRef{OwnerName: fmt.Sprintf("pod-%d", i)},
+				Action: securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+			},
 		})
 	}
 
@@ -112,11 +115,11 @@ func TestBufferDrainAfterOverflow(t *testing.T) {
 		require.Equal(
 			t,
 			expected,
-			rec.SrcName,
+			rec.Source.OwnerName,
 			"record at index %d should be %s, got %s",
 			i,
 			expected,
-			rec.SrcName,
+			rec.Source.OwnerName,
 		)
 	}
 }
@@ -129,10 +132,11 @@ func TestConcurrentRecordAndDrain(_ *testing.T) {
 	// Concurrently record.
 	go func() {
 		for i := range 1000 {
-			buf.Record(ViolationRecord{
-				SrcName:   fmt.Sprintf("pod-%d", i),
-				Action:    "protect",
-				Direction: networkingv1.PolicyTypeEgress,
+			buf.Record(Observation{
+				ViolationInfo: securityv1alpha1.ViolationInfo{
+					Source: securityv1alpha1.WorkloadRef{OwnerName: fmt.Sprintf("pod-%d", i)},
+					Action: securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+				},
 			})
 		}
 		close(done)

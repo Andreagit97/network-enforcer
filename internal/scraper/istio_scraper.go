@@ -20,7 +20,6 @@ import (
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -203,7 +202,7 @@ func (s *IstioScraper) recordPolicyEvent(
 
 	violation.EmitOtelLog(ctx, s.ViolationOtelLogger, observation)
 
-	if dropped := s.ViolationBuffer.Record(observationToBufferRecord(observation)); dropped {
+	if dropped := s.ViolationBuffer.Record(observation); dropped {
 		s.Logger.WarnContext(ctx, "Violation buffer is full, dropped the oldest violation")
 	}
 }
@@ -237,25 +236,6 @@ func policyEventToObservation(
 			DenyingPolicyNamespace: policyNamespace,
 			DenyingPolicyName:      policyName,
 		},
-	}
-}
-
-// observationToBufferRecord maps the in-flight observation into the shared
-// violation buffer shape consumed by the status sync.
-func observationToBufferRecord(obs violation.Observation) violation.ViolationRecord {
-	return violation.ViolationRecord{
-		Timestamp: obs.Timestamp.Time,
-		// These records are produced on the destination ztunnel for inbound
-		// connections, so the direction is always ingress.
-		Direction:              networkingv1.PolicyTypeIngress,
-		SrcName:                obs.Source.OwnerName,
-		DstNamespace:           obs.Dest.Namespace,
-		DstName:                obs.Dest.OwnerName,
-		Protocol:               obs.Protocol,
-		DstPort:                obs.DstPort,
-		Action:                 obs.Action,
-		DenyingPolicyNamespace: obs.DenyingPolicyNamespace,
-		DenyingPolicyName:      obs.DenyingPolicyName,
 	}
 }
 

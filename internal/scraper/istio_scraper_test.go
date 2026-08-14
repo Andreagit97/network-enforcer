@@ -16,7 +16,7 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type fakeOtelEventLogger struct {
@@ -85,7 +85,7 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 		wantLearned *types.LearningEvent
 		// wantRecord is the violation buffer record expected, or nil when the
 		// record must not reach the buffer.
-		wantRecord *violation.ViolationRecord
+		wantRecord *violation.Observation
 		// wantOtel is the number of policy_violation_observed OTel logs emitted.
 		wantOtel int
 	}{
@@ -114,16 +114,20 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 				policyKey:            "default/deny-http-server-monitor",
 				srcAddrKey:           "10.244.0.9:46266",
 			},
-			wantRecord: &violation.ViolationRecord{
-				Timestamp:              wantTimestamp,
-				Direction:              networkingv1.PolicyTypeIngress,
-				SrcName:                "10.244.0.9:46266",
-				DstNamespace:           "default",
-				DstName:                "http-server-7bbf596dd9-8gs65",
-				Protocol:               corev1.ProtocolTCP,
-				Action:                 securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
-				DenyingPolicyNamespace: "default",
-				DenyingPolicyName:      "deny-http-server-monitor",
+			wantRecord: &violation.Observation{
+				Provider: securityv1alpha1.PolicyBackendIstio,
+				ViolationInfo: securityv1alpha1.ViolationInfo{
+					Timestamp: metav1.NewTime(wantTimestamp),
+					Source:    securityv1alpha1.WorkloadRef{OwnerName: "10.244.0.9:46266"},
+					Dest: securityv1alpha1.WorkloadRef{
+						Namespace: "default",
+						OwnerName: "http-server-7bbf596dd9-8gs65",
+					},
+					Protocol:               corev1.ProtocolTCP,
+					Action:                 securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
+					DenyingPolicyNamespace: "default",
+					DenyingPolicyName:      "deny-http-server-monitor",
+				},
 			},
 			wantOtel: 1,
 		},
@@ -135,16 +139,20 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 				policyKey:            "default/deny-http-server-protect",
 				srcAddrKey:           "10.244.0.5:49084",
 			},
-			wantRecord: &violation.ViolationRecord{
-				Timestamp:              wantTimestamp,
-				Direction:              networkingv1.PolicyTypeIngress,
-				SrcName:                "10.244.0.5:49084",
-				DstNamespace:           "default",
-				DstName:                "http-server-6cbcc86f5d-lhq82",
-				Protocol:               corev1.ProtocolTCP,
-				Action:                 securityv1alpha1.WorkloadNetworkPolicyModeProtect,
-				DenyingPolicyNamespace: "default",
-				DenyingPolicyName:      "deny-http-server-protect",
+			wantRecord: &violation.Observation{
+				Provider: securityv1alpha1.PolicyBackendIstio,
+				ViolationInfo: securityv1alpha1.ViolationInfo{
+					Timestamp: metav1.NewTime(wantTimestamp),
+					Source:    securityv1alpha1.WorkloadRef{OwnerName: "10.244.0.5:49084"},
+					Dest: securityv1alpha1.WorkloadRef{
+						Namespace: "default",
+						OwnerName: "http-server-6cbcc86f5d-lhq82",
+					},
+					Protocol:               corev1.ProtocolTCP,
+					Action:                 securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+					DenyingPolicyNamespace: "default",
+					DenyingPolicyName:      "deny-http-server-protect",
+				},
 			},
 			wantOtel: 1,
 		},
@@ -155,14 +163,18 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 				dstNamespacedNameKey: "default/http-server-6cbcc86f5d-lhq82",
 				srcAddrKey:           "10.244.0.5:52814",
 			},
-			wantRecord: &violation.ViolationRecord{
-				Timestamp:    wantTimestamp,
-				Direction:    networkingv1.PolicyTypeIngress,
-				SrcName:      "10.244.0.5:52814",
-				DstNamespace: "default",
-				DstName:      "http-server-6cbcc86f5d-lhq82",
-				Protocol:     corev1.ProtocolTCP,
-				Action:       securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+			wantRecord: &violation.Observation{
+				Provider: securityv1alpha1.PolicyBackendIstio,
+				ViolationInfo: securityv1alpha1.ViolationInfo{
+					Timestamp: metav1.NewTime(wantTimestamp),
+					Source:    securityv1alpha1.WorkloadRef{OwnerName: "10.244.0.5:52814"},
+					Dest: securityv1alpha1.WorkloadRef{
+						Namespace: "default",
+						OwnerName: "http-server-6cbcc86f5d-lhq82",
+					},
+					Protocol: corev1.ProtocolTCP,
+					Action:   securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+				},
 			},
 			wantOtel: 1,
 		},
@@ -203,7 +215,7 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 
 			drained := buffer.Drain()
 			if tc.wantRecord != nil {
-				require.Equal(t, []violation.ViolationRecord{*tc.wantRecord}, drained)
+				require.Equal(t, []violation.Observation{*tc.wantRecord}, drained)
 			} else {
 				require.Empty(t, drained)
 			}

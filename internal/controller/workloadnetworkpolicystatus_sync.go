@@ -95,23 +95,17 @@ func (r *WorkloadNetworkPolicyStatusSync) Start(ctx context.Context) error {
 }
 
 func convertMonitorViolations(
-	monitorViolation []violation.ViolationRecord,
+	monitorViolation []violation.Observation,
 ) []*agentv1.ViolationRecord {
 	result := make([]*agentv1.ViolationRecord, 0, len(monitorViolation))
 	for _, v := range monitorViolation {
 		result = append(result,
 			&agentv1.ViolationRecord{
-				Timestamp:              timestamppb.New(v.Timestamp),
-				NodeName:               v.NodeName,
-				Direction:              string(v.Direction),
-				SourceNamespace:        v.SrcNamespace,
-				SourceName:             v.SrcName,
-				SourceWorkloads:        v.SrcWorkloads,
-				SourceLabels:           v.SrcLabels,
-				DestNamespace:          v.DstNamespace,
-				DestName:               v.DstName,
-				DestWorkloads:          v.DstWorkloads,
-				DestLabels:             v.DstLabels,
+				Timestamp:              timestamppb.New(v.Timestamp.Time),
+				SourceNamespace:        v.Source.Namespace,
+				SourceName:             v.Source.OwnerName,
+				DestNamespace:          v.Dest.Namespace,
+				DestName:               v.Dest.OwnerName,
 				Protocol:               string(v.Protocol),
 				DstPort:                v.DstPort,
 				Action:                 string(v.Action),
