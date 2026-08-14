@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/rancher-sandbox/network-enforcer/internal/types/loglevel"
 	otellog "go.opentelemetry.io/otel/log"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	corev1 "k8s.io/api/core/v1"
@@ -128,7 +129,7 @@ func (r *WorkloadNetworkPolicyStatusSync) sync(ctx context.Context) error {
 		return fmt.Errorf("failed to list WorkloadNetworkPolicies: %w", err)
 	}
 	if len(wnpList.Items) == 0 {
-		r.logger.V(1).Info("No WorkloadNetworkPolicies found, skipping sync")
+		r.logger.V(loglevel.VerbosityDebug).Info("No WorkloadNetworkPolicies found, skipping sync")
 		return nil
 	}
 
@@ -311,7 +312,7 @@ func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForDestWorkload(
 		if apierrors.IsNotFound(err) {
 			// The destination pod churned away before this sync cycle; expected
 			// and self-correcting, so keep it to the debug trace to avoid spam.
-			r.logger.V(1).Info(
+			r.logger.V(loglevel.VerbosityDebug).Info(
 				"Destination pod for ALLOW-miss violation no longer exists, cannot correlate",
 				"destNamespace", dstNamespace,
 				"destPod", dstPod,
@@ -464,7 +465,7 @@ func (r *WorkloadNetworkPolicyStatusSync) processWorkloadNetworkPolicy(
 
 	acknowledged := newPolicy.RecomputeStatus(violations, now)
 
-	r.logger.V(1).Info("Updating WorkloadNetworkPolicy status",
+	r.logger.V(loglevel.VerbosityDebug).Info("Updating WorkloadNetworkPolicy status",
 		"policy", wnp.NamespacedName(),
 		"violations", len(violations),
 		"acknowledged", len(acknowledged),

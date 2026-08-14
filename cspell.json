@@ -111,6 +111,7 @@
         "omitempty",
 		"printcolumn",
 		"deepcopy",
+		"loglevel",
     ],
     "import": []
 }
