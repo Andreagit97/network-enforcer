@@ -24,6 +24,7 @@ const (
 	simpleAppManifest             = "simple_app.yaml"
 	simpleAppClientDeploymentName = "http-client"
 	simpleAppServerDeploymentName = "http-server"
+	simpleAppClientServiceAccount = "http-client-sa"
 	simpleAppTCPServicePort       = int32(18080)
 	simpleAppUDPServicePort       = int32(18083)
 	simpleAppUDPServerPort        = int32(18081)
@@ -114,6 +115,9 @@ func getProtoCmd(proto corev1.Protocol) (string, []string) {
 			),
 		}
 	case corev1.ProtocolUDP:
+		// UDP is out of scope for the Istio ambient path (traffic does not
+		// pass through ztunnel), but it will be needed for the calico and
+		// cilium providers.
 		return udpPayload, []string{
 			"sh",
 			"-c",

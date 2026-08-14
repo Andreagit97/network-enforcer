@@ -1,4 +1,14 @@
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: http-client-sa
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: http-server-sa
+---
+apiVersion: v1
 kind: Service
 metadata:
   name: http-service
@@ -31,6 +41,7 @@ spec:
       labels:
         app: http-server
     spec:
+      serviceAccountName: http-server-sa
       containers:
       - name: http-server
         image: nicolaka/netshoot:v0.16
@@ -59,6 +70,7 @@ spec:
       labels:
         app: http-client
     spec:
+      serviceAccountName: http-client-sa
       containers:
         - image: nicolaka/netshoot:v0.16
           name: http-client

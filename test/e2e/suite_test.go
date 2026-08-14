@@ -69,14 +69,13 @@ func TestMain(m *testing.M) {
 		setupFuncs = append([]env.Func{
 			envfuncs.CreateClusterWithConfig(kind.NewProvider(), clusterName, testSuiteConf.kindConfigPath),
 			envfuncs.LoadImageToCluster(clusterName, testSuiteConf.controllerImage),
-			envfuncs.LoadImageToCluster(clusterName, testSuiteConf.cniWatcherImage),
 		}, setupFuncs...)
 	}
 
 	// Optional dependencies, controlled by E2E_DEPENDENCIES.
 	// Default (empty/unset): both are installed. Set "none" to skip all.
-	if testSuiteConf.HasE2EDependency("cni") {
-		setupFuncs = append(setupFuncs, installCNI())
+	if testSuiteConf.HasE2EDependency("istio") {
+		setupFuncs = append(setupFuncs, installProviderMesh())
 	}
 	if testSuiteConf.HasE2EDependency("cert-manager") {
 		setupFuncs = append(setupFuncs, installCertManager())
@@ -115,7 +114,6 @@ func installNetEnforcerChart() env.Func {
 
 		testCfg := getSuiteConfig(ctx)
 		controllerRepo, controllerTag := parseImage(testCfg.controllerImage)
-		cniWatcherRepo, cniWatcherTag := parseImage(testCfg.cniWatcherImage)
 
 		helmOpts := []helm.Option{
 			helm.WithName(testCfg.releaseName),
@@ -124,22 +122,11 @@ func installNetEnforcerChart() env.Func {
 			helm.WithArgs("--create-namespace"),
 			helm.WithArgs("--set", fmt.Sprintf("controller.image.repository=%s", controllerRepo)),
 			helm.WithArgs("--set", fmt.Sprintf("controller.image.tag=%s", controllerTag)),
-			helm.WithArgs("--set", fmt.Sprintf("cniwatcher.image.repository=%s", cniWatcherRepo)),
-			helm.WithArgs("--set", fmt.Sprintf("cniwatcher.image.tag=%s", cniWatcherTag)),
-			helm.WithArgs("--set", fmt.Sprintf("cniwatcher.cniType=%s", testCfg.cni)),
-			helm.WithArgs("--set", fmt.Sprintf("obi.config.data.otel_metrics_export.interval=%s",
-				testCfg.drainFlowsInterval.String())),
-			helm.WithArgs("--set", fmt.Sprintf("controller.drainFlowsInterval=%s",
-				testCfg.drainFlowsInterval.String())),
 			helm.WithArgs("--set", fmt.Sprintf("controller.wnpStatusUpdateInterval=%s",
 				testCfg.wnpStatusUpdateInterval.String())),
 			helm.WithWait(),
 			helm.WithTimeout(defaultHelmTimeout.String()),
 		}
-
-		// we want to install these agents on all the nodes (control-plane included)
-		helmOpts = append(helmOpts, generateKindControlPlaneTolerations("cniwatcher.")...)
-		helmOpts = append(helmOpts, generateKindControlPlaneTolerations("obi.")...)
 
 		logger.InfoContext(ctx, "🛠️ installing network enforcer chart", "releaseName", testCfg.releaseName)
 		if err := manager.RunInstall(helmOpts...); err != nil {
@@ -159,26 +146,20 @@ func installNetEnforcerChart() env.Func {
 			return ctx, fmt.Errorf("wait network enforcer deployment ready: %w", err)
 		}
 
-		logger.InfoContext(ctx, "⏲️ waiting for cniwatcher")
+		// the istio-fluent-bit DaemonSet tails ztunnel access logs and forwards
+		// them via OTLP to the controller's istio scraper (the learning source).
+		logger.InfoContext(ctx, "⏲️ waiting for istio fluent-bit")
 		if err = wait.For(
 			conditions.New(r).DaemonSetReady(
 				&appsv1.DaemonSet{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "network-enforcer-cniwatcher",
+						Name:      "network-enforcer-istio-fluent-bit",
 						Namespace: testCfg.releaseNS,
 					},
 				}),
 			wait.WithTimeout(defaultOperationTimeout),
 		); err != nil {
-			return ctx, fmt.Errorf("wait network enforcer daemonset ready: %w", err)
-		}
-
-		logger.InfoContext(ctx, "⏲️ waiting for otel collector")
-		if err = wait.For(
-			conditions.New(r).DeploymentAvailable(defaultOTelCollectorDeploymentName, testCfg.releaseNS),
-			wait.WithTimeout(defaultOperationTimeout),
-		); err != nil {
-			return ctx, fmt.Errorf("wait otel collector deployment ready: %w", err)
+			return ctx, fmt.Errorf("wait istio fluent-bit daemonset ready: %w", err)
 		}
 
 		return ctx, nil
