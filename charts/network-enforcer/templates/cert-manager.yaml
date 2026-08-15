@@ -1,4 +1,4 @@
-{{- if .Values.controller.webhook.enabled }}
+{{- if eq .Values.telemetry.collectorStrategy "default" }}
 ---
 apiVersion: cert-manager.io/v1
 kind: Issuer

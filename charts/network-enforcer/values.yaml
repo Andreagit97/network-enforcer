@@ -33,11 +33,6 @@ controller:
   podAnnotations: {}
   nodeSelector: {}
   affinity: {}
-  webhook:
-    # todo!: remove this config when we are in a stable state.
-    # Disable admission webhook resources/cert mounts to avoid cert-manager
-    # dependency for now
-    enabled: false
   provider:
     # @schema required
     # @schema enum: [istio, cilium, calico]
@@ -50,6 +45,11 @@ controller:
     # @schema type: [integer, string]
     endpoint: ""
   wnpStatusUpdateInterval: 30s
+
+# ValidatingAdmissionPolicy for WorkloadNetworkPolicyProposal promote-label enum
+# check. Requires Kubernetes 1.30+ (admissionregistration.k8s.io/v1).
+vap:
+  enabled: true
 
 kubernetesClusterDomain: cluster.local
 imagePullSecrets: []
