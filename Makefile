@@ -242,14 +242,14 @@ endif
 	@echo "🧪 Running e2e tests with '$(E2E_PROVIDER)' provider..."
 	E2E_PROVIDER=$(E2E_PROVIDER) E2E_USE_EXISTING_CLUSTER=$(E2E_USE_EXISTING_CLUSTER) E2E_DEPENDENCIES=$(E2E_DEPENDENCIES) go test -v ./test/e2e/... -count=1
 
-# Create kind cluster and install selected CNI with dependencies.
-# Example: `make setup-dev-cluster E2E_CNI=cilium`
+# Create kind cluster and install selected provider with dependencies.
+# Example: `make setup-dev-cluster E2E_PROVIDER=istio`
 .PHONY: setup-dev-cluster
 setup-dev-cluster:
-	@echo "🛠️ Setting up dev cluster with '$(E2E_CNI)' CNI..."
+	@echo "🛠️ Setting up dev cluster with '$(E2E_PROVIDER)' provider..."
 	make test-e2e E2E_INSTALL_CLUSTER_ONLY=kind
-	@echo "🛠️ Calling tilt with '$(E2E_CNI)' CNI..."
-	tilt up -- --cni=$(E2E_CNI)
+	@echo "🛠️ Calling tilt with '$(E2E_PROVIDER)' provider..."
+	tilt up -- --provider=$(E2E_PROVIDER)
 
 .PHONY: delete-dev-cluster
 delete-dev-cluster:

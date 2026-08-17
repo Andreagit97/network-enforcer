@@ -1,6 +1,7 @@
 package types
 
 import (
+	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -75,10 +76,8 @@ type PolicyDenyEvent struct {
 }
 
 // LearningEvent represents a learning event in the network enforcer.
-// todo!: we need to adapt this learning event to all the providers not just Istio.
 type LearningEvent struct {
-	DstName      string `json:"dst_name"`
-	DstNamespace string `json:"dst_namespace"`
-	DstPort      string `json:"dst_port"`
-	SrcIdentity  string `json:"src_identity"`
+	Source  *securityv1alpha1.WorkloadRef `json:"source"`
+	Dest    *securityv1alpha1.WorkloadRef `json:"dest"`
+	DstPort string                        `json:"dst_port"`
 }

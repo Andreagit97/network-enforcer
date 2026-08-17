@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
+	"github.com/rancher-sandbox/network-enforcer/internal/workload"
 )
 
 // ---------------------------------------------------------------------------
@@ -58,12 +59,12 @@ func newViolation(
 			Timestamp: metav1.NewTime(ts),
 			Source: securityv1alpha1.WorkloadRef{
 				Namespace: srcNS,
-				OwnerKind: "Deployment",
+				OwnerKind: workload.KindDeployment,
 				OwnerName: srcName,
 			},
 			Dest: securityv1alpha1.WorkloadRef{
 				Namespace: dstNS,
-				OwnerKind: "Service",
+				OwnerKind: workload.KindService,
 				OwnerName: dstName,
 			},
 			Protocol:               corev1.ProtocolTCP,
@@ -518,10 +519,10 @@ func TestProcessWorkloadNetworkPolicy_TwoPhasePatch(t *testing.T) {
 			ViolationInfo: securityv1alpha1.ViolationInfo{
 				Timestamp: metav1.NewTime(now.Add(-10 * time.Minute)),
 				Source: securityv1alpha1.WorkloadRef{
-					Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
+					Namespace: "src-ns", OwnerKind: workload.KindDeployment, OwnerName: "app",
 				},
 				Dest: securityv1alpha1.WorkloadRef{
-					Namespace: "dst-ns", OwnerKind: "Service", OwnerName: "svc",
+					Namespace: "dst-ns", OwnerKind: workload.KindService, OwnerName: "svc",
 				},
 				Protocol:               corev1.ProtocolTCP,
 				DstPort:                80,
@@ -658,10 +659,10 @@ func TestSyncClearsViolationsWithNoNewScrapedViolations(t *testing.T) {
 				ViolationInfo: securityv1alpha1.ViolationInfo{
 					Timestamp: metav1.NewTime(now.Add(-10 * time.Minute)),
 					Source: securityv1alpha1.WorkloadRef{
-						Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
+						Namespace: "src-ns", OwnerKind: workload.KindDeployment, OwnerName: "app",
 					},
 					Dest: securityv1alpha1.WorkloadRef{
-						Namespace: "dst-ns", OwnerKind: "Service", OwnerName: "svc",
+						Namespace: "dst-ns", OwnerKind: workload.KindService, OwnerName: "svc",
 					},
 					Protocol:               corev1.ProtocolTCP,
 					DstPort:                80,
@@ -733,10 +734,10 @@ func TestTwoPhasePatchConflict(t *testing.T) {
 			ViolationInfo: securityv1alpha1.ViolationInfo{
 				Timestamp: metav1.NewTime(time.Now()),
 				Source: securityv1alpha1.WorkloadRef{
-					Namespace: "ns1", OwnerKind: "Deployment", OwnerName: "app",
+					Namespace: "ns1", OwnerKind: workload.KindDeployment, OwnerName: "app",
 				},
 				Dest: securityv1alpha1.WorkloadRef{
-					Namespace: "ns2", OwnerKind: "Service", OwnerName: "svc",
+					Namespace: "ns2", OwnerKind: workload.KindService, OwnerName: "svc",
 				},
 				Protocol:               corev1.ProtocolTCP,
 				DstPort:                80,

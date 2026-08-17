@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/rancher-sandbox/network-enforcer/internal/workload"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -54,22 +55,7 @@ type WorkloadNetworkPolicySpec struct {
 // and owner name. Identity is the provider-specific workload identity (SPIFFE
 // for Istio, numeric security ID for Cilium, empty for Calico); it is needed
 // for exact attribution, e.g. matching Istio principals in a policy rule.
-type WorkloadRef struct {
-	// Namespace is the Kubernetes namespace of the workload.
-	// +optional
-	Namespace string `json:"namespace,omitempty"`
-	// OwnerKind is the kind of the owner resource (e.g. Deployment, StatefulSet,
-	// DaemonSet).
-	// +optional
-	OwnerKind string `json:"ownerKind,omitempty"`
-	// OwnerName is the name of the owner resource.
-	// +optional
-	OwnerName string `json:"ownerName,omitempty"`
-	// Identity is the provider-specific workload identity: SPIFFE for Istio,
-	// numeric security ID for Cilium, empty for Calico.
-	// +optional
-	Identity string `json:"identity,omitempty"`
-}
+type WorkloadRef workload.Ref
 
 // ViolationInfo holds the details of a single network policy violation without
 // the controller-assigned ID. Backend scrapers produce observations in this

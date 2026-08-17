@@ -19,6 +19,7 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
+	"github.com/rancher-sandbox/network-enforcer/internal/workload"
 )
 
 type fakeEventLogger struct {
@@ -101,10 +102,10 @@ func ackTestViolation(denyingPolicyName string) securityv1alpha1.ViolationRecord
 		ViolationInfo: securityv1alpha1.ViolationInfo{
 			Timestamp: metav1.NewTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
 			Source: securityv1alpha1.WorkloadRef{
-				Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
+				Namespace: "src-ns", OwnerKind: workload.KindDeployment, OwnerName: "app",
 			},
 			Dest: securityv1alpha1.WorkloadRef{
-				Namespace: "dst-ns", OwnerKind: "Service", OwnerName: "svc",
+				Namespace: "dst-ns", OwnerKind: workload.KindService, OwnerName: "svc",
 			},
 			Protocol:               corev1.ProtocolTCP,
 			DstPort:                80,

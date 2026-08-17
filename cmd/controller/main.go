@@ -134,7 +134,17 @@ func setupProviderScraper(
 			return fmt.Errorf("unable to add istio scraper to manager: %w", err)
 		}
 		return nil
-	case providerCilium, providerCalico:
+	case providerCilium:
+		ciliumScraper := scraper.NewCiliumScraper(scraper.CiliumScraperConfig{
+			Logger:               logger.With("component", "cilium-scraper"),
+			Endpoint:             conf.provider.endpoint,
+			EnqueueLearningEvent: learningEnqueueFunc,
+		})
+		if err := mgr.Add(ciliumScraper); err != nil {
+			return fmt.Errorf("unable to add istio scraper to manager: %w", err)
+		}
+		return nil
+	case providerCalico:
 		fallthrough
 	default:
 		return fmt.Errorf("unsupported provider %q", conf.provider.name)

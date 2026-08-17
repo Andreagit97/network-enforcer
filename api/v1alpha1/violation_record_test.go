@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rancher-sandbox/network-enforcer/internal/workload"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -20,12 +21,12 @@ func mkViolation() ViolationRecord {
 			Timestamp: metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
 			Source: WorkloadRef{
 				Namespace: "ns1",
-				OwnerKind: "Deployment",
+				OwnerKind: workload.KindDeployment,
 				OwnerName: "app",
 			},
 			Dest: WorkloadRef{
 				Namespace: "ns2",
-				OwnerKind: "Service",
+				OwnerKind: workload.KindService,
 				OwnerName: "svc",
 			},
 			Protocol:               corev1.ProtocolTCP,
@@ -57,13 +58,13 @@ func (r ViolationRecord) withDstPort(port int32) ViolationRecord {
 
 // withDest returns a copy with a different destination name.
 func (r ViolationRecord) withDest(ns, name string) ViolationRecord {
-	r.Dest = WorkloadRef{Namespace: ns, OwnerKind: "Service", OwnerName: name}
+	r.Dest = WorkloadRef{Namespace: ns, OwnerKind: workload.KindService, OwnerName: name}
 	return r
 }
 
 // withSource returns a copy with a different source name.
 func (r ViolationRecord) withSource(ns, name string) ViolationRecord {
-	r.Source = WorkloadRef{Namespace: ns, OwnerKind: "Deployment", OwnerName: name}
+	r.Source = WorkloadRef{Namespace: ns, OwnerKind: workload.KindDeployment, OwnerName: name}
 	return r
 }
 
@@ -284,7 +285,7 @@ func TestClearAllowedViolations(t *testing.T) {
 				base,
 				func() ViolationRecord {
 					r := base
-					r.Source = WorkloadRef{Namespace: "ns3", OwnerKind: "Deployment", OwnerName: "other"}
+					r.Source = WorkloadRef{Namespace: "ns3", OwnerKind: workload.KindDeployment, OwnerName: "other"}
 					return r
 				}(),
 			},
@@ -600,12 +601,12 @@ func TestAcknowledgeViolationsFromAnnotations(t *testing.T) {
 				Timestamp: metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
 				Source: WorkloadRef{
 					Namespace: "ns1",
-					OwnerKind: "Deployment",
+					OwnerKind: workload.KindDeployment,
 					OwnerName: "app",
 				},
 				Dest: WorkloadRef{
 					Namespace: "ns2",
-					OwnerKind: "Service",
+					OwnerKind: workload.KindService,
 					OwnerName: fmt.Sprintf("svc-%d", id),
 				},
 				Protocol:               corev1.ProtocolTCP,

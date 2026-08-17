@@ -703,6 +703,12 @@ spec:
                                 Identity is the provider-specific workload identity: SPIFFE for Istio,
                                 numeric security ID for Cilium, empty for Calico.
                               type: string
+                            labels:
+                              additionalProperties:
+                                type: string
+                              description: Labels are the Kubernetes labels of the
+                                workload.
+                              type: object
                             namespace:
                               description: Namespace is the Kubernetes namespace of
                                 the workload.
@@ -746,6 +752,12 @@ spec:
                                 Identity is the provider-specific workload identity: SPIFFE for Istio,
                                 numeric security ID for Cilium, empty for Calico.
                               type: string
+                            labels:
+                              additionalProperties:
+                                type: string
+                              description: Labels are the Kubernetes labels of the
+                                workload.
+                              type: object
                             namespace:
                               description: Namespace is the Kubernetes namespace of
                                 the workload.
@@ -835,6 +847,11 @@ spec:
                             Identity is the provider-specific workload identity: SPIFFE for Istio,
                             numeric security ID for Cilium, empty for Calico.
                           type: string
+                        labels:
+                          additionalProperties:
+                            type: string
+                          description: Labels are the Kubernetes labels of the workload.
+                          type: object
                         namespace:
                           description: Namespace is the Kubernetes namespace of the
                             workload.
@@ -878,6 +895,11 @@ spec:
                             Identity is the provider-specific workload identity: SPIFFE for Istio,
                             numeric security ID for Cilium, empty for Calico.
                           type: string
+                        labels:
+                          additionalProperties:
+                            type: string
+                          description: Labels are the Kubernetes labels of the workload.
+                          type: object
                         namespace:
                           description: Namespace is the Kubernetes namespace of the
                             workload.

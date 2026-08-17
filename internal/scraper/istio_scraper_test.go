@@ -99,11 +99,15 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 				srcIdentityKey:  "spiffe://cluster.local/ns/default/sa/http-client-sa",
 			},
 			wantLearned: &types.LearningEvent{
-				DstName:      "http-server-7bbf596dd9-4rgdc",
-				DstNamespace: "default",
-				DstPort:      "18080",
-				// the `spiffe://` scheme is stripped on ingest.
-				SrcIdentity: "cluster.local/ns/default/sa/http-client-sa",
+				Dest: &securityv1alpha1.WorkloadRef{
+					Namespace: "default",
+					OwnerName: "http-server-7bbf596dd9-4rgdc",
+				},
+				Source: &securityv1alpha1.WorkloadRef{
+					// the `spiffe://` scheme is stripped on ingest.
+					Identity: "cluster.local/ns/default/sa/http-client-sa",
+				},
+				DstPort: "18080",
 			},
 		},
 		{

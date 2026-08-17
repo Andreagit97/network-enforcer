@@ -13,26 +13,25 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
-	"github.com/rancher-sandbox/network-enforcer/internal/ownerkind"
-	"github.com/rancher-sandbox/network-enforcer/internal/topology"
+	"github.com/rancher-sandbox/network-enforcer/internal/workload"
 )
 
-// workloadKeyFromPod fetches the Pod and resolves it to a WorkloadKey.
-// Callers should use ownerkind.IsValidEndpoint to decide whether the result is
+// workloadRefFromPod fetches the Pod and resolves it to a WorkloadRef.
+// Callers should use workload.IsValidEndpoint to decide whether the result is
 // supported.
-func workloadKeyFromPod(
+func workloadRefFromPod(
 	ctx context.Context,
 	c client.Client,
 	namespace, podName string,
-) (topology.WorkloadKey, error) {
+) (securityv1alpha1.WorkloadRef, error) {
 	var pod corev1.Pod
 	if err := c.Get(ctx, types.NamespacedName{Name: podName, Namespace: namespace}, &pod); err != nil {
-		return topology.WorkloadKey{}, fmt.Errorf("getting Pod %s/%s: %w", namespace, podName, err)
+		return securityv1alpha1.WorkloadRef{}, fmt.Errorf("getting Pod %s/%s: %w", namespace, podName, err)
 	}
-	return extractWorkloadKey(&pod), nil
+	return extractWorkloadRef(&pod), nil
 }
 
-// extractWorkloadKey resolves a Pod to its owning workload from controller
+// extractWorkloadRef resolves a Pod to its owning workload from controller
 // OwnerReferences. Deployment pods are owned by a ReplicaSet; we infer the
 // Deployment name from the pod-template-hash label. StatefulSet and DaemonSet
 // own pods directly.
@@ -40,55 +39,55 @@ func workloadKeyFromPod(
 // Heuristics for additional kinds (Job/CronJob, OpenShift DeploymentConfig)
 // live in runtime-enforcer's former getPodInfo and can be ported when needed:
 // https://github.com/rancher-sandbox/runtime-enforcer/pull/219/changes#diff-65f18bba13a51ac9c01c9f32f9c222070bb8f3dda11868f44c75889265381f5fL45
-func extractWorkloadKey(pod *corev1.Pod) topology.WorkloadKey {
+func extractWorkloadRef(pod *corev1.Pod) securityv1alpha1.WorkloadRef {
 	namespace := pod.Namespace
 	ref := metav1.GetControllerOf(pod)
 	if ref == nil {
-		return topology.WorkloadKey{
+		return securityv1alpha1.WorkloadRef{
 			Namespace: namespace,
-			OwnerKind: ownerkind.KindPod,
+			OwnerKind: workload.KindPod,
 			OwnerName: pod.Name,
 		}
 	}
 
 	kind, name := ref.Kind, ref.Name
-	if kind == string(ownerkind.KindReplicaSet) {
+	if kind == string(workload.KindReplicaSet) {
 		hash := pod.Labels[appsv1.DefaultDeploymentUniqueLabelKey]
 		if hash == "" || !strings.HasSuffix(name, hash) {
-			return topology.WorkloadKey{
+			return securityv1alpha1.WorkloadRef{
 				Namespace: namespace,
-				OwnerKind: ownerkind.KindReplicaSet,
+				OwnerKind: workload.KindReplicaSet,
 				OwnerName: name,
 			}
 		}
-		kind = string(ownerkind.KindDeployment)
+		kind = string(workload.KindDeployment)
 		name = strings.TrimSuffix(name, "-"+hash)
 	}
 
-	return topology.WorkloadKey{
+	return securityv1alpha1.WorkloadRef{
 		Namespace: namespace,
-		OwnerKind: ownerkind.Kind(kind),
+		OwnerKind: workload.Kind(kind),
 		OwnerName: name,
 	}
 }
 
-func getProposalName(workload topology.WorkloadKey, direction networkingv1.PolicyType) string {
+func getProposalName(workloadRef securityv1alpha1.WorkloadRef, direction networkingv1.PolicyType) string {
 	return fmt.Sprintf(
 		"%s-%s-%s",
-		strings.ToLower(string(workload.OwnerKind)),
-		workload.OwnerName,
+		strings.ToLower(string(workloadRef.OwnerKind)),
+		workloadRef.OwnerName,
 		strings.ToLower(string(direction)),
 	)
 }
 
 func getProposalMetadata(
-	workload topology.WorkloadKey,
+	workloadRef securityv1alpha1.WorkloadRef,
 	direction networkingv1.PolicyType,
 ) *securityv1alpha1.WorkloadNetworkPolicyProposal {
 	return &securityv1alpha1.WorkloadNetworkPolicyProposal{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      getProposalName(workload, direction),
-			Namespace: workload.Namespace,
+			Name:      getProposalName(workloadRef, direction),
+			Namespace: workloadRef.Namespace,
 		},
 	}
 }
@@ -96,10 +95,10 @@ func getProposalMetadata(
 func lookupPodSelectorForWorkload(
 	ctx context.Context,
 	c client.Client,
-	wk topology.WorkloadKey,
+	wk securityv1alpha1.WorkloadRef,
 ) (metav1.LabelSelector, error) {
 	switch wk.OwnerKind { //nolint:exhaustive // we don't support all workload kinds
-	case ownerkind.KindDeployment:
+	case workload.KindDeployment:
 		var deploy appsv1.Deployment
 		if err := c.Get(ctx, types.NamespacedName{Name: wk.OwnerName, Namespace: wk.Namespace}, &deploy); err != nil {
 			return metav1.LabelSelector{}, fmt.Errorf(
@@ -110,7 +109,7 @@ func lookupPodSelectorForWorkload(
 			)
 		}
 		return *deploy.Spec.Selector, nil
-	case ownerkind.KindStatefulSet:
+	case workload.KindStatefulSet:
 		var sts appsv1.StatefulSet
 		if err := c.Get(ctx, types.NamespacedName{Name: wk.OwnerName, Namespace: wk.Namespace}, &sts); err != nil {
 			return metav1.LabelSelector{}, fmt.Errorf(
@@ -121,7 +120,7 @@ func lookupPodSelectorForWorkload(
 			)
 		}
 		return *sts.Spec.Selector, nil
-	case ownerkind.KindDaemonSet:
+	case workload.KindDaemonSet:
 		var ds appsv1.DaemonSet
 		if err := c.Get(ctx, types.NamespacedName{Name: wk.OwnerName, Namespace: wk.Namespace}, &ds); err != nil {
 			return metav1.LabelSelector{}, fmt.Errorf("looking up DaemonSet %s/%s: %w", wk.Namespace, wk.OwnerName, err)

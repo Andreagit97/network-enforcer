@@ -51,12 +51,12 @@ func EmitOtelLog(ctx context.Context, logger otellog.Logger, observation Observa
 
 	addStringAttrs(&rec, otelAttrSrcName, observation.Source.OwnerName)
 	addStringAttrs(&rec, otelAttrSrcNamespace, observation.Source.Namespace)
-	addStringAttrs(&rec, otelAttrSrcKind, observation.Source.OwnerKind)
+	addStringAttrs(&rec, otelAttrSrcKind, string(observation.Source.OwnerKind))
 	addStringAttrs(&rec, otelAttrSrcIdentity, observation.Source.Identity)
 
 	addStringAttrs(&rec, otelAttrDstName, observation.Dest.OwnerName)
 	addStringAttrs(&rec, otelAttrDstNamespace, observation.Dest.Namespace)
-	addStringAttrs(&rec, otelAttrDstKind, observation.Dest.OwnerKind)
+	addStringAttrs(&rec, otelAttrDstKind, string(observation.Dest.OwnerKind))
 
 	addStringAttrs(&rec, otelAttrTransport, string(observation.Protocol))
 
