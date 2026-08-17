@@ -43,7 +43,7 @@ tests:
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --provider-endpoint=hubble-relay.cilium.svc:7443
+          content: --provider-endpoint=hubble-relay.kube-system.svc:80
       - notExists:
           path: spec.template.spec.containers[0].ports
 
