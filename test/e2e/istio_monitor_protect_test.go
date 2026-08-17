@@ -11,6 +11,7 @@ import (
 
 	"github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/stretchr/testify/require"
+	"istio.io/api/annotation"
 	istiosecurityv1beta1 "istio.io/api/security/v1beta1"
 	istiosecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -27,10 +28,6 @@ const istioIngressProposalName = "deployment-" + simpleAppServerDeploymentName +
 // part of the learned policy. Traffic to it violates the policy: in monitor
 // mode it is observed (dry-run) and still flows, in protect mode it is blocked.
 const simpleAppViolatingServerPort = int32(18082)
-
-// istioDryRunAnnotation is the annotation the reconciler uses to mark an
-// AuthorizationPolicy as monitor (dry-run) mode.
-const istioDryRunAnnotation = "istio.io/dry-run"
 
 // TestIstioMonitorProtectFlow exercises the full Istio lifecycle: after the
 // learning phase produces a proposal, it promotes it to a monitor policy
@@ -112,7 +109,7 @@ func checkIstioAuthorizationPolicy(
 				t.Logf("AuthorizationPolicy %q not available yet: %v", istioIngressProposalName, err)
 				return false
 			}
-			_, hasDryRun := ap.Annotations[istioDryRunAnnotation]
+			_, hasDryRun := ap.Annotations[annotation.IoIstioDryRun.Name]
 			return (mode == v1alpha1.WorkloadNetworkPolicyModeMonitor) == hasDryRun
 		}, defaultOperationTimeout, 1*time.Second,
 			"AuthorizationPolicy %q is not in the expected %q state", istioIngressProposalName, mode)
@@ -141,10 +138,10 @@ func checkIstioAuthorizationPolicy(
 		)
 
 		if mode == v1alpha1.WorkloadNetworkPolicyModeMonitor {
-			require.Equal(t, "true", ap.Annotations[istioDryRunAnnotation],
+			require.Equal(t, "true", ap.Annotations[annotation.IoIstioDryRun.Name],
 				"monitor AuthorizationPolicy should carry the dry-run annotation")
 		} else {
-			require.NotContains(t, ap.Annotations, istioDryRunAnnotation,
+			require.NotContains(t, ap.Annotations, annotation.IoIstioDryRun.Name,
 				"protect AuthorizationPolicy should not carry the dry-run annotation")
 		}
 		return ctx
