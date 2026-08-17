@@ -62,7 +62,7 @@ Name of the controller OTLP service used to reach the istio scraper.
 Resolved provider endpoint (configured or default by provider).
 Defaults:
 - istio: 4317
-- cilium: unix:///var/run/cilium/hubble.sock
+- cilium: hubble-relay.cilium.svc:7443
 - calico: goldmane.calico-system.svc:7443
 */}}
 {{- define "network-enforcer.controller.providerEndpoint" -}}
