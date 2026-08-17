@@ -9,6 +9,7 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/stretchr/testify/require"
+	istiosecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -56,6 +57,9 @@ func injectSecurityV1Alpha1Client() env.Func {
 		}
 		if err = securityv1alpha1.AddToScheme(r.GetScheme()); err != nil {
 			return ctx, fmt.Errorf("cannot add securityv1alpha1 to scheme: %w", err)
+		}
+		if err = istiosecurityv1.AddToScheme(r.GetScheme()); err != nil {
+			return ctx, fmt.Errorf("cannot add istio security v1 to scheme: %w", err)
 		}
 		return context.WithValue(ctx, clientKey, r), nil
 	}
@@ -107,8 +111,12 @@ func addLocalChartRepo(ctx context.Context, manager *helm.Manager, localRepoName
 	if err := manager.RunRepo(helm.WithArgs("add", localRepoName, repoURL)); err != nil {
 		return fmt.Errorf("failed to add local helm repo: %w", err)
 	}
-	if err := manager.RunRepo(helm.WithArgs("update")); err != nil {
-		return fmt.Errorf("failed to update helm repos: %w", err)
+	// Refresh only the repo we just added: a global `helm repo update` would
+	// also refresh every other repo configured on the machine (e.g. on shared
+	// dev boxes or CI runners), and one unreachable repo would fail the whole
+	// e2e setup.
+	if err := manager.RunRepo(helm.WithArgs("update", localRepoName)); err != nil {
+		return fmt.Errorf("failed to update local helm repo: %w", err)
 	}
 	return nil
 }
