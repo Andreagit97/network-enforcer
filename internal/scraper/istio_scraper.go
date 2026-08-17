@@ -25,10 +25,6 @@ import (
 
 const gracefulGRPCTimeout = 5 * time.Second
 
-type OTLPConf struct {
-	Port int
-}
-
 type LearningEnqueueFunc func(types.LearningEvent) bool
 
 const (
@@ -56,7 +52,7 @@ type IstioScraperConfig struct {
 	EnqueueLearningEvent LearningEnqueueFunc
 	Logger               *slog.Logger
 	ViolationOtelLogger  otellog.Logger
-	OTLPConf             OTLPConf
+	OtelPort             int
 }
 
 // IstioScraper receives OTLP log events from istio-watchers.
@@ -79,7 +75,7 @@ func (s *IstioScraper) Start(ctx context.Context) error {
 		s.Logger.InfoContext(ctx, "istio scraper has stopped")
 	}()
 	lc := net.ListenConfig{}
-	addr := fmt.Sprintf(":%d", s.OTLPConf.Port)
+	addr := fmt.Sprintf(":%d", s.OtelPort)
 	listener, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", addr, err)

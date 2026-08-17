@@ -38,6 +38,17 @@ controller:
     # Disable admission webhook resources/cert mounts to avoid cert-manager
     # dependency for now
     enabled: false
+  provider:
+    # @schema required
+    # @schema enum: [istio, cilium, calico]
+    name: istio
+    # Provider defaults when endpoint is empty:
+    # istio  -> 4317
+    # cilium -> hubble-relay.kube-system.svc:80
+    # calico -> goldmane.calico-system.svc:7443
+    #
+    # @schema type: [integer, string]
+    endpoint: ""
   wnpStatusUpdateInterval: 30s
 
 kubernetesClusterDomain: cluster.local

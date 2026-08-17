@@ -52,10 +52,49 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 
 {{/*
-DNS name of the controller OTLP service; also a SAN on the controller cert.
+Name of the controller OTLP service used to reach the istio scraper.
 */}}
-{{- define "network-enforcer.controller.otlpServiceDNS" -}}
-{{ include "network-enforcer.fullname" . }}-otlp.{{ .Release.Namespace }}.svc.cluster.local
+{{- define "network-enforcer.controller.istioService" -}}
+{{ include "network-enforcer.fullname" . }}-istio-otlp
+{{- end -}}
+
+{{/*
+Resolved provider endpoint (configured or default by provider).
+Defaults:
+- istio: 4317
+- cilium: hubble-relay.kube-system.svc:80
+- calico: goldmane.calico-system.svc:7443
+*/}}
+{{- define "network-enforcer.controller.providerEndpoint" -}}
+{{- $provider := default "istio" .Values.controller.provider.name -}}
+{{- $endpoint := .Values.controller.provider.endpoint -}}
+{{- if not (empty $endpoint) -}}
+{{- $endpoint -}}
+{{- else if eq $provider "istio" -}}
+4317
+{{- else if eq $provider "cilium" -}}
+hubble-relay.kube-system.svc:80
+{{- else if eq $provider "calico" -}}
+goldmane.calico-system.svc:7443
+{{- else -}}
+{{- fail (printf "unsupported controller.provider.name %q" $provider) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Validated Istio OTLP port.
+Accepts configured int/string or provider default from helper.
+*/}}
+{{- define "network-enforcer.controller.istioPort" -}}
+{{- $raw := include "network-enforcer.controller.providerEndpoint" . | trim -}}
+{{- if not (regexMatch "^[0-9]{1,5}$" $raw) -}}
+{{- fail (printf "controller.provider.endpoint must be a numeric port when controller.provider.name=istio (got %q)" $raw) -}}
+{{- end -}}
+{{- $port := atoi $raw -}}
+{{- if or (lt $port 1) (gt $port 65535) -}}
+{{- fail (printf "controller.provider.endpoint must be in range 1-65535 when controller.provider.name=istio (got %d)" $port) -}}
+{{- end -}}
+{{- $port -}}
 {{- end -}}
 
 {{/*
@@ -64,6 +103,14 @@ keys, mounted via cert-manager CSI.
 */}}
 {{- define "network-enforcer.otelCollector.certDir" -}}
 /etc/otel-collector/certs
+{{- end -}}
+
+{{/*
+CA certificate path used by the controller when sending OTLP logs to the
+shipped in-cluster collector.
+*/}}
+{{- define "network-enforcer.otel.caCertPath" -}}
+/etc/network-enforcer/certs/ca.crt
 {{- end -}}
 
 

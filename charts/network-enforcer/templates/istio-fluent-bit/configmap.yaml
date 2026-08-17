@@ -1,3 +1,4 @@
+{{- if eq .Values.controller.provider.name "istio" }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -41,8 +42,8 @@ data:
     [OUTPUT]
         Name                     opentelemetry
         Match                    istio.ztunnel
-        Host                     {{ include "network-enforcer.fullname" . }}-otlp
-        Port                     4317
+        Host                     {{ include "network-enforcer.controller.istioService" . }}
+        Port                     {{ include "network-enforcer.controller.istioPort" . }}
         grpc                     On
         grpc_logs_uri            /opentelemetry.proto.collector.logs.v1.LogsService/Export
         Logs_Body_Key            body
@@ -64,3 +65,4 @@ data:
 
   ztunnel_to_otel.lua: |
 {{ .Files.Get "files/istio-fluent-bit/ztunnel_to_otel.lua" | nindent 4 }}
+{{- end }}
