@@ -73,12 +73,6 @@ manifests: controller-gen ## Generate CRDs and RBAC.
 generate: manifests controller-gen generate-chart-values ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
-.PHONY: proto-agent
-proto-agent: $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC) ## Generate Go code from proto/agent/v1/agent.proto.
-	PATH=$(LOCALBIN):$(PATH) protoc --go_out=. --go_opt=paths=source_relative \
-		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
-		proto/agent/v1/agent.proto
-
 .PHONY: fmt
 fmt: ## Run go fmt against code.
 	go fmt ./...
@@ -150,8 +144,6 @@ $(LOCALBIN):
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
-PROTOC_GEN_GO ?= $(LOCALBIN)/protoc-gen-go
-PROTOC_GEN_GO_GRPC ?= $(LOCALBIN)/protoc-gen-go-grpc
 HELM_VALUES_SCHEMA_JSON ?= $(LOCALBIN)/helm-values-schema-json
 
 ## Tool Versions
@@ -188,16 +180,6 @@ setup-envtest: envtest ## Download the binaries required for ENVTEST in the loca
 envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
-
-.PHONY: protoc-gen-go
-protoc-gen-go: $(PROTOC_GEN_GO)
-$(PROTOC_GEN_GO): | $(LOCALBIN)
-	$(call go-install-tool,$(PROTOC_GEN_GO),google.golang.org/protobuf/cmd/protoc-gen-go,$(PROTOC_GEN_GO_VERSION))
-
-.PHONY: protoc-gen-go-grpc
-protoc-gen-go-grpc: $(PROTOC_GEN_GO_GRPC)
-$(PROTOC_GEN_GO_GRPC): | $(LOCALBIN)
-	$(call go-install-tool,$(PROTOC_GEN_GO_GRPC),google.golang.org/grpc/cmd/protoc-gen-go-grpc,$(PROTOC_GEN_GO_GRPC_VERSION))
 
 .PHONY: helm-values-schema-json
 helm-values-schema-json: $(HELM_VALUES_SCHEMA_JSON) ## Download helm-values-schema-json locally if necessary.
