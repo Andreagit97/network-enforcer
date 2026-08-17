@@ -8,9 +8,7 @@ import (
 // entry is overwritten.
 const MaxBufferEntries = 10_000
 
-// Buffer is a thread-safe ring buffer for violation records.
-// The cniwatcher calls Record() for each deny event; the gRPC server calls
-// Drain() when the controller scrapes.
+// Buffer is a thread-safe ring buffer for violation observations.
 type Buffer struct {
 	mtx sync.Mutex
 	buf []Observation

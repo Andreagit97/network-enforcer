@@ -28,7 +28,7 @@ const eventNamePolicyViolationAcknowledged = "policy_violation_acknowledged"
 
 // +kubebuilder:rbac:groups=security.rancher.io,resources=workloadnetworkpolicies/status,verbs=get;patch;update
 
-// WorkloadNetworkPolicyStatusSync scrapes cniwatcher pods, correlates denies
+// WorkloadNetworkPolicyStatusSync drains buffered violation observations, correlates denies
 // to the owning WNP, and writes status/annotations via two-phase patch.
 // When eventLogger is set it emits policy_violation_acknowledged after a
 // successful status patch (ordering guard, no duplicate logs on retry).
@@ -84,10 +84,10 @@ func (r *WorkloadNetworkPolicyStatusSync) Start(ctx context.Context) error {
 }
 
 func convertObservationsToViolations(
-	monitorViolation []violation.Observation,
+	observations []violation.Observation,
 ) []securityv1alpha1.ViolationRecord {
-	result := make([]securityv1alpha1.ViolationRecord, 0, len(monitorViolation))
-	for _, v := range monitorViolation {
+	result := make([]securityv1alpha1.ViolationRecord, 0, len(observations))
+	for _, v := range observations {
 		result = append(result,
 			securityv1alpha1.ViolationRecord{
 				ViolationInfo: v.ViolationInfo,
@@ -120,7 +120,6 @@ func (r *WorkloadNetworkPolicyStatusSync) sync(ctx context.Context) error {
 		return fmt.Errorf("failed to build ownership index: %w", err)
 	}
 
-	// monitor violations coming from the topology scraper
 	violations := convertObservationsToViolations(r.violationBuffer.Drain())
 	// Group scraped violations by the owning WNP
 	violationsByWNP := r.correlateViolationsToWNPs(ctx, violations, ownedIndex, wnpByKey)
