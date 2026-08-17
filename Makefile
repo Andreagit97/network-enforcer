@@ -255,3 +255,7 @@ setup-dev-cluster:
 delete-dev-cluster:
 	@echo "🛠️ Delete dev cluster..."
 	kind delete cluster
+
+.PHONY: helm-unit-test
+helm-unit-test:
+	helm unittest charts/network-enforcer/ --file "tests/**/*_test.yaml"

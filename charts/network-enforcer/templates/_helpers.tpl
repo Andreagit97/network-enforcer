@@ -105,6 +105,14 @@ keys, mounted via cert-manager CSI.
 /etc/otel-collector/certs
 {{- end -}}
 
+{{/*
+CA certificate path used by the controller when sending OTLP logs to the
+shipped in-cluster collector.
+*/}}
+{{- define "network-enforcer.otel.caCertPath" -}}
+/etc/network-enforcer/certs/ca.crt
+{{- end -}}
+
 
 {{/*
 Print the otel environment variable settings.
