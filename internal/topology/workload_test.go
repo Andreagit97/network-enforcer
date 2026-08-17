@@ -1,4 +1,4 @@
-package controller
+package topology
 
 import (
 	"context"
@@ -15,7 +15,6 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/ownerkind"
-	"github.com/rancher-sandbox/network-enforcer/internal/topology"
 )
 
 const testNamespace = "default"
@@ -62,12 +61,12 @@ func TestExtractWorkloadKey(t *testing.T) {
 	tests := []struct {
 		name string
 		pod  *corev1.Pod
-		want topology.WorkloadKey
+		want WorkloadKey
 	}{
 		{
 			name: "standalone pod without controller",
 			pod:  ownedPod("mypod", nil, nil),
-			want: topology.WorkloadKey{
+			want: WorkloadKey{
 				Namespace: testNamespace,
 				OwnerKind: ownerkind.KindPod,
 				OwnerName: "mypod",
@@ -84,7 +83,7 @@ func TestExtractWorkloadKey(t *testing.T) {
 				),
 				map[string]string{},
 			),
-			want: topology.WorkloadKey{
+			want: WorkloadKey{
 				Namespace: testNamespace,
 				OwnerKind: ownerkind.KindReplicaSet,
 				OwnerName: "runtime-enforcer-controller-manager-6f4b9855c6",
@@ -103,7 +102,7 @@ func TestExtractWorkloadKey(t *testing.T) {
 					appsv1.DefaultDeploymentUniqueLabelKey: "6f4b9855c6",
 				},
 			),
-			want: topology.WorkloadKey{
+			want: WorkloadKey{
 				Namespace: testNamespace,
 				OwnerKind: ownerkind.KindDeployment,
 				OwnerName: "runtime-enforcer-controller-manager",
@@ -116,7 +115,7 @@ func TestExtractWorkloadKey(t *testing.T) {
 				controllerRef("apps/v1", string(ownerkind.KindStatefulSet), "db"),
 				nil,
 			),
-			want: topology.WorkloadKey{
+			want: WorkloadKey{
 				Namespace: testNamespace,
 				OwnerKind: ownerkind.KindStatefulSet,
 				OwnerName: "db",
@@ -129,7 +128,7 @@ func TestExtractWorkloadKey(t *testing.T) {
 				controllerRef("apps/v1", string(ownerkind.KindDaemonSet), "agent"),
 				nil,
 			),
-			want: topology.WorkloadKey{
+			want: WorkloadKey{
 				Namespace: testNamespace,
 				OwnerKind: ownerkind.KindDaemonSet,
 				OwnerName: "agent",
@@ -142,7 +141,7 @@ func TestExtractWorkloadKey(t *testing.T) {
 				controllerRef("batch/v1", "Job", "ubuntu-job"),
 				nil,
 			),
-			want: topology.WorkloadKey{
+			want: WorkloadKey{
 				Namespace: testNamespace,
 				OwnerKind: ownerkind.Kind("Job"),
 				OwnerName: "ubuntu-job",
@@ -153,7 +152,7 @@ func TestExtractWorkloadKey(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			require.Equal(t, tt.want, extractWorkloadKey(tt.pod))
+			require.Equal(t, tt.want, ExtractWorkloadKey(tt.pod))
 		})
 	}
 }
@@ -172,14 +171,14 @@ func TestWorkloadKeyFromPod(t *testing.T) {
 		WithObjects(pod).
 		Build()
 
-	got, err := workloadKeyFromPod(context.Background(), cl, testNamespace, pod.Name)
+	got, err := WorkloadKeyFromPod(context.Background(), cl, testNamespace, pod.Name)
 	require.NoError(t, err)
-	require.Equal(t, topology.WorkloadKey{
+	require.Equal(t, WorkloadKey{
 		Namespace: testNamespace,
 		OwnerKind: ownerkind.KindDeployment,
 		OwnerName: "frontend",
 	}, got)
 
-	_, err = workloadKeyFromPod(context.Background(), cl, testNamespace, "missing")
+	_, err = WorkloadKeyFromPod(context.Background(), cl, testNamespace, "missing")
 	require.True(t, apierrors.IsNotFound(err))
 }

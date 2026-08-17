@@ -44,6 +44,7 @@ import (
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/controller"
 	"github.com/rancher-sandbox/network-enforcer/internal/events"
+	"github.com/rancher-sandbox/network-enforcer/internal/istio"
 	"github.com/rancher-sandbox/network-enforcer/internal/scraper"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
@@ -121,6 +122,7 @@ func setupProviderScraper(
 			ViolationOtelLogger:  eventLogger,
 			Logger:               logger.With("component", "istio-scraper"),
 			OtelPort:             otelPort,
+			Enricher:             istio.NewEnricher(mgr.GetClient()),
 		})
 		if err = mgr.Add(istioScraper); err != nil {
 			return fmt.Errorf("unable to add istio scraper to manager: %w", err)
@@ -214,6 +216,12 @@ func run(logger *slog.Logger, conf *config) error {
 	mgr, err := newControllerManager(conf)
 	if err != nil {
 		return fmt.Errorf("unable to create controller manager: %w", err)
+	}
+
+	// Enriching the source workload of an Istio violation is by peer IP, so
+	// register the pod status.podIP index before the cache starts.
+	if err = controller.SetupPodIPIndexer(ctx, mgr); err != nil {
+		return fmt.Errorf("unable to set up pod IP indexer: %w", err)
 	}
 
 	var eventLogger otellog.Logger

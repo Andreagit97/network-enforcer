@@ -36,7 +36,11 @@ func testObservation() Observation {
 				OwnerName: "http-client-1",
 				Identity:  "spiffe://cluster.local/ns/default/sa/http-client-sa",
 			},
-			Dest:     securityv1alpha1.WorkloadRef{Namespace: "default", OwnerName: "http-server-1"},
+			Dest: securityv1alpha1.WorkloadRef{
+				Namespace: "default",
+				OwnerName: "http-server-1",
+				Identity:  "cluster.local/ns/default/sa/http-server-sa",
+			},
 			Protocol: corev1.ProtocolTCP,
 			DstPort:  80,
 			Action:   securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
@@ -83,6 +87,7 @@ func TestEmitOtelLogSchema(t *testing.T) {
 	require.Equal(t, "spiffe://cluster.local/ns/default/sa/http-client-sa", attrs["source.workload.identity"])
 	require.Equal(t, "http-server-1", attrs["destination.workload.name"])
 	require.Equal(t, "default", attrs["destination.workload.namespace"])
+	require.Equal(t, "cluster.local/ns/default/sa/http-server-sa", attrs["destination.workload.identity"])
 	require.Equal(t, "TCP", attrs["network.transport"])
 	require.Equal(t, "80", attrs["destination.port"])
 	require.Equal(t, "default", attrs["policy.ref.namespace"])
@@ -98,8 +103,10 @@ func TestEmitOtelLogSchema(t *testing.T) {
 	require.NotPanics(t, func() { EmitOtelLog(context.Background(), nil, obs) })
 }
 
-// TestEmitOtelLogAllowMiss pins the allow-miss representation: no denying
-// policy is fabricated (the policy fields stay empty).
+// TestEmitOtelLogAllowMiss pins that empty policy-ref fields are omitted rather
+// than emitted as blanks. An observation reaches EmitOtelLog before correlation,
+// so an ALLOW-miss whose owning WNP has not been resolved carries empty policy
+// fields; the emit must not fabricate a policy.ref attribute for it.
 func TestEmitOtelLogAllowMiss(t *testing.T) {
 	logger := &fakeOtelLogger{}
 

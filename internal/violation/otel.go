@@ -24,6 +24,7 @@ const (
 	otelAttrDstName      = "destination.workload.name"
 	otelAttrDstNamespace = "destination.workload.namespace"
 	otelAttrDstKind      = "destination.workload.kind"
+	otelAttrDstIdentity  = "destination.workload.identity"
 
 	otelAttrTransport = "network.transport"
 	otelAttrDstPort   = "destination.port"
@@ -57,6 +58,7 @@ func EmitOtelLog(ctx context.Context, logger otellog.Logger, observation Observa
 	addStringAttrs(&rec, otelAttrDstName, observation.Dest.OwnerName)
 	addStringAttrs(&rec, otelAttrDstNamespace, observation.Dest.Namespace)
 	addStringAttrs(&rec, otelAttrDstKind, observation.Dest.OwnerKind)
+	addStringAttrs(&rec, otelAttrDstIdentity, observation.Dest.Identity)
 
 	addStringAttrs(&rec, otelAttrTransport, string(observation.Protocol))
 

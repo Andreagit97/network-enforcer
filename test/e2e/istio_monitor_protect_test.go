@@ -272,9 +272,10 @@ func getServerPodIP(ctx context.Context, t *testing.T) string {
 
 // assertViolationWithAction polls the policy status until a violation with the
 // given action appears, then asserts the Istio ALLOW-miss violation semantics:
-// TCP, destination is the server pod, and no denying policy name (Istio only
-// reports policy names for explicit DENY policies; ALLOW-miss violations are
-// correlated by destination workload).
+// TCP, destination is the server deployment, and the owning WorkloadNetworkPolicy
+// recorded in the DenyingPolicy fields. Istio reports no denying policy on the
+// wire for an ALLOW-miss, so the enricher resolves the owning WNP by selector
+// match and records it there (see istio.Enricher); it is the policy under test.
 func assertViolationWithAction(
 	ctx context.Context,
 	t *testing.T,
@@ -311,10 +312,12 @@ func assertViolationWithAction(
 		}
 		require.Equal(t, corev1.ProtocolTCP, v.Protocol, "violation protocol does not match expected")
 		require.Equal(t, namespace, v.Dest.Namespace, "violation destination namespace does not match expected")
-		require.True(t, strings.HasPrefix(v.Dest.OwnerName, simpleAppServerDeploymentName+"-"),
-			"violation destination should be the server pod, got %q", v.Dest.OwnerName)
-		require.Empty(t, v.DenyingPolicyName,
-			"ALLOW-miss violations carry no denying policy name (attribution limitation)")
+		require.True(t, strings.HasPrefix(v.Dest.OwnerName, simpleAppServerDeploymentName),
+			"violation destination should be the server deployment, got %q", v.Dest.OwnerName)
+		require.Equal(t, istioIngressProposalName, v.DenyingPolicyName,
+			"ALLOW-miss violation should carry the owning WorkloadNetworkPolicy name")
+		require.Equal(t, namespace, v.DenyingPolicyNamespace,
+			"ALLOW-miss violation should carry the owning WorkloadNetworkPolicy namespace")
 		found = true
 		break
 	}

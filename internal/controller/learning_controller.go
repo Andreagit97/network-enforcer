@@ -142,7 +142,7 @@ func upsertIstioLearnedRule(
 func (r *LearningReconciler) processIstioLearningEvent(ctx context.Context, req types.LearningEvent) error {
 	// For istio proposals are inbound, so we always need to search for inbound proposal for
 	// the destination.
-	workload, err := workloadKeyFromPod(ctx, r.Client, req.DstNamespace, req.DstName)
+	workload, err := topology.WorkloadKeyFromPod(ctx, r.Client, req.DstNamespace, req.DstName)
 	if err != nil {
 		return fmt.Errorf("resolving destination workload for %s/%s: %w", req.DstNamespace, req.DstName, err)
 	}
