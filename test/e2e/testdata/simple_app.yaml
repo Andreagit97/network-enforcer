@@ -20,6 +20,14 @@ spec:
       protocol: TCP
       port: 18080
       targetPort: 18080
+    - name: tcp-violating
+      protocol: TCP
+      # the server listens on this port but it is NOT part of the learned
+      # policy: traffic to it produces a violation (observed in monitor mode,
+      # blocked in protect mode) while still echoing the payload so tests can
+      # rely on the round-trip.
+      port: 18082
+      targetPort: 18082
     - name: udp-echo
       protocol: UDP
       # we use a different port on purpose for the service
