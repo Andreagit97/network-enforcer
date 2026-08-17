@@ -1,3 +1,4 @@
+{{- if eq .Values.controller.provider.name "istio" }}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -78,3 +79,4 @@ spec:
             path: /var/lib/docker/containers
         - name: state
           emptyDir: {}
+{{- end }}

@@ -31,6 +31,8 @@ spec:
       containers:
       - args:
         {{- toYaml .Values.controller.args | nindent 8 }}
+        - --provider-name={{ .Values.controller.provider.name }}
+        - --provider-endpoint={{ include "network-enforcer.controller.providerEndpoint" . }}
         - --wnp-status-reconciler-update-interval={{ .Values.controller.wnpStatusUpdateInterval }}
         command:
         - /controller
@@ -45,10 +47,12 @@ spec:
           | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
         name: manager
+        {{- if eq .Values.controller.provider.name "istio" }}
         ports:
-        - containerPort: 4317
+        - containerPort: {{ include "network-enforcer.controller.istioPort" . }}
           name: otlp-grpc
           protocol: TCP
+        {{- end }}
         livenessProbe:
           httpGet:
             path: /healthz

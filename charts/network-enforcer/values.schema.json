@@ -87,6 +87,29 @@
                     },
                     "additionalProperties": false
                 },
+                "provider": {
+                    "type": "object",
+                    "required": [
+                        "name"
+                    ],
+                    "properties": {
+                        "endpoint": {
+                            "type": [
+                                "integer",
+                                "string"
+                            ]
+                        },
+                        "name": {
+                            "type": "string",
+                            "enum": [
+                                "istio",
+                                "cilium",
+                                "calico"
+                            ]
+                        }
+                    },
+                    "additionalProperties": false
+                },
                 "replicas": {
                     "type": "integer"
                 },

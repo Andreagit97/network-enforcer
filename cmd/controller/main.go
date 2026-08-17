@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"time"
 
 	otellog "go.opentelemetry.io/otel/log"
@@ -45,6 +46,7 @@ import (
 	"github.com/rancher-sandbox/network-enforcer/internal/controller"
 	"github.com/rancher-sandbox/network-enforcer/internal/events"
 	"github.com/rancher-sandbox/network-enforcer/internal/scraper"
+	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	// +kubebuilder:scaffold:imports
 )
@@ -55,6 +57,14 @@ const (
 	// when the manager stops. The manager context is already cancelled at
 	// that point, so the shutdown runs against a fresh context.
 	otlpLogShutdownTimeout = 10 * time.Second
+)
+
+type provider string
+
+const (
+	providerIstio  provider = "istio"
+	providerCilium provider = "cilium"
+	providerCalico provider = "calico"
 )
 
 type otelConf struct {
@@ -78,6 +88,11 @@ type webhookConf struct {
 	CertKey  string
 }
 
+type providerConfig struct {
+	name     string
+	endpoint string
+}
+
 type config struct {
 	metrics              metricsConf
 	webhook              webhookConf
@@ -85,10 +100,45 @@ type config struct {
 	probeAddr            string
 	secureMetrics        bool
 	enableHTTP2          bool
-	otlpPort             int
+	provider             providerConfig
 	otel                 otelConf
 	tlsOpts              []func(*tls.Config)
 	wnpStatusSyncConfig  controller.WorkloadNetworkPolicyStatusSyncConfig
+}
+
+func setupProviderScraper(
+	ctx context.Context,
+	logger *slog.Logger,
+	mgr manager.Manager,
+	conf *config,
+	learningEnqueueFunc func(types.LearningEvent) bool,
+	violationBuffer *violation.Buffer,
+	eventLogger otellog.Logger,
+) error {
+	providerName := provider(conf.provider.name)
+	logger.InfoContext(ctx, "Configuring scraper", "provider", providerName)
+	switch providerName {
+	case providerIstio:
+		otelPort, err := strconv.Atoi(conf.provider.endpoint)
+		if err != nil {
+			return fmt.Errorf("istio provider: invalid OTEL port %q: %w", conf.provider.endpoint, err)
+		}
+		istioScraper := scraper.NewIstioScraper(scraper.IstioScraperConfig{
+			ViolationBuffer:      violationBuffer,
+			EnqueueLearningEvent: learningEnqueueFunc,
+			ViolationOtelLogger:  eventLogger,
+			Logger:               logger.With("component", "istio-scraper"),
+			OtelPort:             otelPort,
+		})
+		if err = mgr.Add(istioScraper); err != nil {
+			return fmt.Errorf("unable to add istio scraper to manager: %w", err)
+		}
+		return nil
+	case providerCilium, providerCalico:
+		fallthrough
+	default:
+		return fmt.Errorf("unsupported provider %q", conf.provider.name)
+	}
 }
 
 func newControllerManager(
@@ -246,19 +296,15 @@ func run(logger *slog.Logger, conf *config) error {
 		return fmt.Errorf("unable to create learning reconciler: %w", err)
 	}
 
-	// todo!: Here the controller should know the cni to understand which scraper we need to run. At the moment we suppose we are always on Istio.
-	istioScraper := scraper.NewIstioScraper(scraper.IstioScraperConfig{
-		ViolationBuffer:      violationBuffer,
-		EnqueueLearningEvent: learningReconciler.GetEnqueueFunc(),
-		ViolationOtelLogger:  eventLogger,
-		Logger:               logger.With("component", "istio-scraper"),
-		OTLPConf: scraper.OTLPConf{
-			Port: conf.otlpPort,
-		},
-	})
-	err = mgr.Add(istioScraper)
-	if err != nil {
-		return fmt.Errorf("unable to add istio scraper to manager: %w", err)
+	if err = setupProviderScraper(ctx,
+		logger,
+		mgr,
+		conf,
+		learningReconciler.GetEnqueueFunc(),
+		violationBuffer,
+		eventLogger,
+	); err != nil {
+		return err
 	}
 
 	if err = setupControllers(ctx, logger, mgr, conf, eventLogger, violationBuffer); err != nil {
@@ -351,7 +397,14 @@ func main() {
 		"The name of the webhook key file.")
 	flag.BoolVar(&conf.enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	flag.IntVar(&conf.otlpPort, "otlp-port", 4317, "The port the OTLP gRPC receiver listens on.")
+	flag.StringVar(&conf.provider.name, "provider-name", "",
+		"Data-plane provider used by the controller. Valid values: istio, cilium, calico.")
+	flag.StringVar(
+		&conf.provider.endpoint,
+		"provider-endpoint",
+		"",
+		"Provider endpoint",
+	)
 	flag.StringVar(&conf.otel.Endpoint, "otlp-log-endpoint",
 		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
 		"OTLP endpoint for the violation-lifecycle log exporter "+
