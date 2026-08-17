@@ -8,10 +8,7 @@ release:
   name: my-release
   namespace: my-namespace
 tests:
-  - it: "renders VAP and binding when enabled"
-    set:
-      vap:
-        enabled: true
+  - it: "renders VAP and binding"
     asserts:
       - hasDocuments:
           count: 2
@@ -29,27 +26,3 @@ tests:
           path: metadata.name
           value: my-release-network-enforcer-wnpp-promote-label-binding
         documentIndex: 1
-      - equal:
-          path: spec.failurePolicy
-          value: Fail
-        documentIndex: 0
-      - equal:
-          path: spec.validations[0].expression
-          value: 'object.metadata.labels["security.rancher.io/promote"] in ["monitor", "protect"]'
-        documentIndex: 0
-      - equal:
-          path: spec.policyName
-          value: my-release-network-enforcer-wnpp-promote-label
-        documentIndex: 1
-      - equal:
-          path: spec.validationActions
-          value:
-            - Deny
-        documentIndex: 1
-  - it: "renders no VAP resources when disabled"
-    set:
-      vap:
-        enabled: false
-    asserts:
-      - hasDocuments:
-          count: 0

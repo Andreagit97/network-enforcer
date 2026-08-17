@@ -46,11 +46,6 @@ controller:
     endpoint: ""
   wnpStatusUpdateInterval: 30s
 
-# ValidatingAdmissionPolicy for WorkloadNetworkPolicyProposal promote-label enum
-# check. Requires Kubernetes 1.30+ (admissionregistration.k8s.io/v1).
-vap:
-  enabled: true
-
 kubernetesClusterDomain: cluster.local
 imagePullSecrets: []
 
