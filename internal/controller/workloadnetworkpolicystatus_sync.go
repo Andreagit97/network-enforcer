@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/rancher-sandbox/network-enforcer/internal/types/loglevel"
-	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	otellog "go.opentelemetry.io/otel/log"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -22,6 +20,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
+	"github.com/rancher-sandbox/network-enforcer/internal/types/loglevel"
+	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 )
 
 const eventNamePolicyViolationAcknowledged = "policy_violation_acknowledged"
@@ -206,15 +206,10 @@ func (r *WorkloadNetworkPolicyStatusSync) correlateViolationsToWNPs(
 		owner, ok := ownedIndex[wnpKey]
 		if ok && owner == nil {
 			// we have an error only in case of policy presence and without owner
-			r.logger.Error(
-				errors.New(
-					"found a Network policy with same name of WNP but not managed by us, cannot register violation",
-				),
-				// todo!: we should use slog.Logger here to be compliant with the repo and to avoid this duplication.
+			err := errors.New(
 				"found a Network policy with same name of WNP but not managed by us, cannot register violation",
-				"denyingPolicy",
-				wnpKey.String(),
 			)
+			r.logger.Error(err, err.Error(), "denyingPolicy", wnpKey.String())
 			continue
 		}
 
