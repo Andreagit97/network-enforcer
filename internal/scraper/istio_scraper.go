@@ -176,10 +176,10 @@ func (s *IstioScraper) enqueueLearningEvent(ctx context.Context, attrs map[strin
 		return
 	}
 	if !s.EnqueueLearningEvent(types.LearningEvent{
-		DstName:      dstName,
-		DstNamespace: dstNamespace,
-		DstPort:      dstPort,
-		SrcIdentity:  srcIdentity,
+		// todo!: we should populate the learning event here, not in the controller.
+		Source:  &securityv1alpha1.WorkloadRef{Identity: srcIdentity},
+		Dest:    &securityv1alpha1.WorkloadRef{Namespace: dstNamespace, OwnerName: dstName},
+		DstPort: dstPort,
 	}) {
 		// todo!: we can consider some rate limiting here
 		s.Logger.WarnContext(ctx, "Failed to enqueue learning event, channel is full")

@@ -8,7 +8,6 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/istio"
-	"github.com/rancher-sandbox/network-enforcer/internal/ownerkind"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	"github.com/stretchr/testify/require"
@@ -104,11 +103,14 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 				srcIdentityKey:  "spiffe://cluster.local/ns/default/sa/http-client-sa",
 			},
 			wantLearned: &types.LearningEvent{
-				DstName:      "http-server-7bbf596dd9-4rgdc",
-				DstNamespace: "default",
-				DstPort:      "18080",
-				// the `spiffe://` scheme is stripped on ingest.
-				SrcIdentity: "cluster.local/ns/default/sa/http-client-sa",
+				Dest: &securityv1alpha1.WorkloadRef{
+					Namespace: "default",
+					OwnerName: "http-server-7bbf596dd9-4rgdc",
+				},
+				Source: &securityv1alpha1.WorkloadRef{
+					Identity: "cluster.local/ns/default/sa/http-client-sa",
+				},
+				DstPort: "18080",
 			},
 		},
 		{
@@ -264,7 +266,7 @@ func TestExportEnrichesObservations(t *testing.T) {
 			},
 			OwnerReferences: []metav1.OwnerReference{{
 				APIVersion: appsv1.SchemeGroupVersion.String(),
-				Kind:       string(ownerkind.KindReplicaSet),
+				Kind:       string(securityv1alpha1.WorkloadKindReplicaSet),
 				Name:       "http-server-" + podTemplateHash,
 				UID:        "http-server-rs-uid",
 				Controller: new(true),

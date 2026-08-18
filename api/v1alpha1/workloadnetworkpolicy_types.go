@@ -49,27 +49,6 @@ type WorkloadNetworkPolicySpec struct {
 	Mode WorkloadNetworkPolicyMode `json:"mode,omitempty"`
 }
 
-// WorkloadRef identifies a Kubernetes workload by its namespace, owner kind,
-// and owner name. Identity is the provider-specific workload identity (SPIFFE
-// for Istio, numeric security ID for Cilium, empty for Calico); it is needed
-// for exact attribution, e.g. matching Istio principals in a policy rule.
-type WorkloadRef struct {
-	// Namespace is the Kubernetes namespace of the workload.
-	// +optional
-	Namespace string `json:"namespace,omitempty"`
-	// OwnerKind is the kind of the owner resource (e.g. Deployment, StatefulSet,
-	// DaemonSet).
-	// +optional
-	OwnerKind string `json:"ownerKind,omitempty"`
-	// OwnerName is the name of the owner resource.
-	// +optional
-	OwnerName string `json:"ownerName,omitempty"`
-	// Identity is the provider-specific workload identity: SPIFFE for Istio,
-	// numeric security ID for Cilium, empty for Calico.
-	// +optional
-	Identity string `json:"identity,omitempty"`
-}
-
 // WorkloadNetworkPolicyStatus defines the observed state of a
 // WorkloadNetworkPolicy.
 type WorkloadNetworkPolicyStatus struct {

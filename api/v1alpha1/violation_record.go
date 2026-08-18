@@ -42,11 +42,11 @@ type ViolationRecordKey struct {
 func (v ViolationRecord) Key() ViolationRecordKey {
 	return ViolationRecordKey{
 		SrcNamespace:           v.Source.Namespace,
-		SrcOwnerKind:           v.Source.OwnerKind,
+		SrcOwnerKind:           string(v.Source.OwnerKind),
 		SrcOwnerName:           v.Source.OwnerName,
 		SrcIdentity:            v.Source.Identity,
 		DstNamespace:           v.Dest.Namespace,
-		DstOwnerKind:           v.Dest.OwnerKind,
+		DstOwnerKind:           string(v.Dest.OwnerKind),
 		DstOwnerName:           v.Dest.OwnerName,
 		DstIdentity:            v.Dest.Identity,
 		Protocol:               string(v.Protocol),
