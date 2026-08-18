@@ -63,8 +63,8 @@ func TestObservationCarriesViolationInfo(t *testing.T) {
 }
 
 // TestEmitOtelLogSchema pins the canonical OTel attribute schema shared by all
-// providers: enforcement.*, source.workload.*, destination.workload.*,
-// network.transport, destination.port and policy.ref.*.
+// providers: enforcement.provider, action, source.workload.*,
+// destination.workload.*, network.transport, destination.port and policy.ref.*.
 func TestEmitOtelLogSchema(t *testing.T) {
 	logger := &fakeOtelLogger{}
 
@@ -82,6 +82,7 @@ func TestEmitOtelLogSchema(t *testing.T) {
 	})
 
 	require.Equal(t, "istio", attrs["enforcement.provider"])
+	require.Equal(t, "monitor", attrs["action"])
 	require.Equal(t, "http-client-1", attrs["source.workload.name"])
 	require.Equal(t, "default", attrs["source.workload.namespace"])
 	require.Equal(t, "spiffe://cluster.local/ns/default/sa/http-client-sa", attrs["source.workload.identity"])

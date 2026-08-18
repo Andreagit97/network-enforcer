@@ -15,6 +15,7 @@ const eventNameViolationObserved = "policy_violation_observed"
 // rename these; consumers (collectors, dashboards) rely on them.
 const (
 	otelAttrEnforcementProvider = "enforcement.provider"
+	otelAttrAction              = "action"
 
 	otelAttrSrcName      = "source.workload.name"
 	otelAttrSrcNamespace = "source.workload.namespace"
@@ -49,6 +50,7 @@ func EmitOtelLog(ctx context.Context, logger otellog.Logger, observation Observa
 	// empty kind/identity placeholders (the istio producer does not know the
 	// owner kind of a workload).
 	addStringAttrs(&rec, otelAttrEnforcementProvider, string(observation.Provider))
+	addStringAttrs(&rec, otelAttrAction, string(observation.Action))
 
 	addStringAttrs(&rec, otelAttrSrcName, observation.Source.OwnerName)
 	addStringAttrs(&rec, otelAttrSrcNamespace, observation.Source.Namespace)
