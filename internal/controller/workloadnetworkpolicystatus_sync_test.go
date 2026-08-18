@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -11,7 +12,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -22,12 +22,17 @@ import (
 // Helpers
 // ---------------------------------------------------------------------------
 
+// testSlogLogger returns a slog logger that discards all output.
+func testSlogLogger() *slog.Logger {
+	return slog.New(slog.DiscardHandler)
+}
+
 // newSyncWithObjects builds a status-sync backed by a fake client seeded with
 // the given objects, for tests that resolve destination workloads from Pods.
 func newSyncWithObjects(objs ...client.Object) *WorkloadNetworkPolicyStatusSync {
 	return &WorkloadNetworkPolicyStatusSync{
 		Client: fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(objs...).Build(),
-		logger: ctrl.Log.WithName("test"),
+		logger: testSlogLogger(),
 	}
 }
 
@@ -181,7 +186,7 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 				}
 				return &WorkloadNetworkPolicyStatusSync{
 					Client: fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(rawNP).Build(),
-					logger: ctrl.Log.WithName("test"),
+					logger: testSlogLogger(),
 				}
 			}(),
 			violations: []securityv1alpha1.ViolationRecord{
@@ -203,7 +208,7 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			name: "warns_when_denying_NetworkPolicy_is_deleted",
 			sync: &WorkloadNetworkPolicyStatusSync{
 				Client: fake.NewClientBuilder().WithScheme(newTestScheme()).Build(),
-				logger: ctrl.Log.WithName("test"),
+				logger: testSlogLogger(),
 			},
 			violations: []securityv1alpha1.ViolationRecord{
 				newViolation(
@@ -510,7 +515,7 @@ func TestProcessWorkloadNetworkPolicy_TwoPhasePatch(t *testing.T) {
 	sync := &WorkloadNetworkPolicyStatusSync{
 		Client:         fakeClient,
 		updateInterval: time.Hour,
-		logger:         ctrl.Log.WithName("test"),
+		logger:         testSlogLogger(),
 	}
 
 	violations := []securityv1alpha1.ViolationRecord{
@@ -599,7 +604,7 @@ func TestSyncSkipsWhenNoWNPs(t *testing.T) {
 	sync := &WorkloadNetworkPolicyStatusSync{
 		Client:         fakeClient,
 		updateInterval: time.Hour,
-		logger:         ctrl.Log.WithName("test"),
+		logger:         testSlogLogger(),
 	}
 
 	err := sync.sync(context.Background())

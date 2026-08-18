@@ -13,7 +13,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -120,7 +119,7 @@ func newTestWorkloadNetworkStatusSync(client client.Client) *WorkloadNetworkPoli
 		Client:          client,
 		updateInterval:  time.Hour,
 		eventLogger:     &fakeEventLogger{},
-		logger:          ctrl.Log.WithName("test"),
+		logger:          testSlogLogger(),
 		violationBuffer: violation.NewBuffer(),
 	}
 }
