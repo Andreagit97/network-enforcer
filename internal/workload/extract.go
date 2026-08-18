@@ -38,6 +38,14 @@ func Get(
 			err,
 		)
 	}
+	if labelSelector == nil {
+		return securityv1alpha1.WorkloadRef{}, fmt.Errorf(
+			"empty label selector for %s %s/%s",
+			ref.OwnerKind,
+			ref.Namespace,
+			ref.OwnerName,
+		)
+	}
 	ref.Selector = *labelSelector
 	return ref, nil
 }
