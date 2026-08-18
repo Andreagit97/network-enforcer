@@ -15,6 +15,7 @@ const eventNameViolationObserved = "policy_violation_observed"
 // rename these; consumers (collectors, dashboards) rely on them.
 const (
 	otelAttrEnforcementProvider = "enforcement.provider"
+	otelAttrAction              = "action"
 
 	otelAttrSrcName      = "source.workload.name"
 	otelAttrSrcNamespace = "source.workload.namespace"
@@ -24,6 +25,7 @@ const (
 	otelAttrDstName      = "destination.workload.name"
 	otelAttrDstNamespace = "destination.workload.namespace"
 	otelAttrDstKind      = "destination.workload.kind"
+	otelAttrDstIdentity  = "destination.workload.identity"
 
 	otelAttrTransport = "network.transport"
 	otelAttrDstPort   = "destination.port"
@@ -48,6 +50,7 @@ func EmitOtelLog(ctx context.Context, logger otellog.Logger, observation Observa
 	// empty kind/identity placeholders (the istio producer does not know the
 	// owner kind of a workload).
 	addStringAttrs(&rec, otelAttrEnforcementProvider, string(observation.Provider))
+	addStringAttrs(&rec, otelAttrAction, string(observation.Action))
 
 	addStringAttrs(&rec, otelAttrSrcName, observation.Source.OwnerName)
 	addStringAttrs(&rec, otelAttrSrcNamespace, observation.Source.Namespace)
@@ -57,6 +60,7 @@ func EmitOtelLog(ctx context.Context, logger otellog.Logger, observation Observa
 	addStringAttrs(&rec, otelAttrDstName, observation.Dest.OwnerName)
 	addStringAttrs(&rec, otelAttrDstNamespace, observation.Dest.Namespace)
 	addStringAttrs(&rec, otelAttrDstKind, observation.Dest.OwnerKind)
+	addStringAttrs(&rec, otelAttrDstIdentity, observation.Dest.Identity)
 
 	addStringAttrs(&rec, otelAttrTransport, string(observation.Protocol))
 

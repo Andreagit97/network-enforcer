@@ -12,6 +12,7 @@ import (
 	"time"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
+	"github.com/rancher-sandbox/network-enforcer/internal/istio"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	otellog "go.opentelemetry.io/otel/log"
@@ -53,6 +54,7 @@ type IstioScraperConfig struct {
 	Logger               *slog.Logger
 	ViolationOtelLogger  otellog.Logger
 	OtelPort             int
+	Enricher             *istio.Enricher
 }
 
 // IstioScraper receives OTLP log events from istio-watchers.
@@ -195,6 +197,12 @@ func (s *IstioScraper) recordPolicyEvent(
 	attrs map[string]string,
 ) {
 	observation := policyEventToObservation(rec, attrs)
+
+	// Enrich the observation (source peer IP / destination pod name -> owning
+	// workload + SPIFFE identity) once here, so both the OTel stream and the
+	// buffered record consumed by the controller carry the attribution. A nil
+	// Enricher is a no-op passthrough.
+	observation = s.Enricher.Enrich(ctx, s.Logger, observation)
 
 	violation.EmitOtelLog(ctx, s.ViolationOtelLogger, observation)
 

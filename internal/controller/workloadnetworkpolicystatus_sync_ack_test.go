@@ -102,9 +102,11 @@ func ackTestViolation(denyingPolicyName string) securityv1alpha1.ViolationRecord
 			Timestamp: metav1.NewTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)),
 			Source: securityv1alpha1.WorkloadRef{
 				Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
+				Identity: "cluster.local/ns/src-ns/sa/app-sa",
 			},
 			Dest: securityv1alpha1.WorkloadRef{
 				Namespace: "dst-ns", OwnerKind: "Service", OwnerName: "svc",
+				Identity: "cluster.local/ns/dst-ns/sa/svc-sa",
 			},
 			Protocol:               corev1.ProtocolTCP,
 			DstPort:                80,
@@ -204,9 +206,11 @@ func TestAcknowledgedViolationEventShape(t *testing.T) {
 	require.Equal(t, "src-ns", attrs["source.namespace"])
 	require.Equal(t, "Deployment", attrs["source.workload.kind"])
 	require.Equal(t, "app", attrs["source.workload.name"])
+	require.Equal(t, "cluster.local/ns/src-ns/sa/app-sa", attrs["source.workload.identity"])
 	require.Equal(t, "dst-ns", attrs["dest.namespace"])
 	require.Equal(t, "Service", attrs["dest.workload.kind"])
 	require.Equal(t, "svc", attrs["dest.workload.name"])
+	require.Equal(t, "cluster.local/ns/dst-ns/sa/svc-sa", attrs["dest.workload.identity"])
 	require.Equal(t, "TCP", attrs["protocol"])
 	require.Equal(t, "80", attrs["dstPort"])
 	require.Equal(t, "protect", attrs["action"])

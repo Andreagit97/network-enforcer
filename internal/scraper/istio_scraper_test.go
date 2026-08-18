@@ -7,6 +7,8 @@ import (
 	"time"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
+	"github.com/rancher-sandbox/network-enforcer/internal/istio"
+	"github.com/rancher-sandbox/network-enforcer/internal/ownerkind"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	"github.com/stretchr/testify/require"
@@ -15,8 +17,11 @@ import (
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 type fakeOtelEventLogger struct {
@@ -221,6 +226,156 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 			}
 
 			require.Len(t, otelLogger.emitted, tc.wantOtel)
+		})
+	}
+}
+
+// TestExportEnrichesObservations verifies that when the scraper is configured
+// with an Enricher, the observation reaching both the OTel stream and the
+// violation buffer carries the resolved source/destination workloads and SPIFFE
+// identities, and that the owning WNP is resolved by selector for both protect
+// and monitor events (WNP violations are always ALLOW-miss).
+func TestExportEnrichesObservations(t *testing.T) {
+	t.Parallel()
+
+	unixNano := time.Date(2026, 8, 3, 15, 39, 7, 0, time.UTC).UnixNano()
+	wantTimestamp := time.Unix(0, unixNano)
+
+	const podTemplateHash = "6cbcc86f5d"
+	const dstPodName = "http-server-" + podTemplateHash + "-lhq82"
+
+	srcPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "http-client-pod",
+			Namespace: "default",
+			UID:       "http-client-pod-uid",
+		},
+		Spec:   corev1.PodSpec{ServiceAccountName: "http-client-sa"},
+		Status: corev1.PodStatus{PodIP: "10.244.0.9"},
+	}
+	dstPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      dstPodName,
+			Namespace: "default",
+			UID:       "http-server-pod-uid",
+			Labels: map[string]string{
+				appsv1.DefaultDeploymentUniqueLabelKey: podTemplateHash,
+				"app":                                  "http-server",
+			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: appsv1.SchemeGroupVersion.String(),
+				Kind:       string(ownerkind.KindReplicaSet),
+				Name:       "http-server-" + podTemplateHash,
+				UID:        "http-server-rs-uid",
+				Controller: new(true),
+			}},
+		},
+		Spec: corev1.PodSpec{ServiceAccountName: "http-server-sa"},
+	}
+	// owningWNP selects the destination workload by label, so an ALLOW-miss (which
+	// carries no denying policy on the wire) resolves its owning WNP by selector.
+	owningWNP := &securityv1alpha1.WorkloadNetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "allow-http-server", Namespace: "default"},
+		Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
+			PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+				Backend: securityv1alpha1.PolicyBackendIstio,
+				Istio: &securityv1alpha1.IstioAuthorizationPolicySpec{
+					Selector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "http-server"}},
+				},
+			},
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, securityv1alpha1.AddToScheme(scheme))
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithIndex(&corev1.Pod{}, istio.PodIPIndexField, istio.IndexPodByIP).
+		WithObjects(srcPod, dstPod, owningWNP).
+		Build()
+
+	// The source and destination workloads resolve identically in both cases; only
+	// the action and the owning/denying policy differ.
+	wantSource := securityv1alpha1.WorkloadRef{
+		Namespace: "default",
+		OwnerKind: "Pod",
+		OwnerName: "http-client-pod",
+		Identity:  "cluster.local/ns/default/sa/http-client-sa",
+	}
+	wantDest := securityv1alpha1.WorkloadRef{
+		Namespace: "default",
+		OwnerKind: "Deployment",
+		OwnerName: "http-server",
+		Identity:  "cluster.local/ns/default/sa/http-server-sa",
+	}
+
+	cases := []struct {
+		name  string
+		attrs map[string]string
+		want  violation.Observation
+	}{
+		{
+			name: "protect ALLOW-miss resolves workloads and owning WNP by selector",
+			attrs: map[string]string{
+				eventTypeKey:         eventTypeProtect,
+				dstNamespacedNameKey: "default/" + dstPodName,
+				srcAddrKey:           "10.244.0.9:46266",
+			},
+			want: violation.Observation{
+				Provider: securityv1alpha1.PolicyBackendIstio,
+				ViolationInfo: securityv1alpha1.ViolationInfo{
+					Timestamp:              metav1.NewTime(wantTimestamp),
+					Source:                 wantSource,
+					Dest:                   wantDest,
+					Protocol:               corev1.ProtocolTCP,
+					Action:                 securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+					DenyingPolicyNamespace: "default",
+					DenyingPolicyName:      "allow-http-server",
+				},
+			},
+		},
+		{
+			name: "monitor ALLOW-miss resolves workloads and owning WNP by selector",
+			attrs: map[string]string{
+				eventTypeKey:         eventTypeMonitor,
+				dstNamespacedNameKey: "default/" + dstPodName,
+				srcAddrKey:           "10.244.0.9:46266",
+			},
+			want: violation.Observation{
+				Provider: securityv1alpha1.PolicyBackendIstio,
+				ViolationInfo: securityv1alpha1.ViolationInfo{
+					Timestamp:              metav1.NewTime(wantTimestamp),
+					Source:                 wantSource,
+					Dest:                   wantDest,
+					Protocol:               corev1.ProtocolTCP,
+					Action:                 securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
+					DenyingPolicyNamespace: "default",
+					DenyingPolicyName:      "allow-http-server",
+				},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			buffer := violation.NewBuffer()
+			otelLogger := &fakeOtelEventLogger{}
+			scraper := NewIstioScraper(IstioScraperConfig{
+				ViolationBuffer:     buffer,
+				ViolationOtelLogger: otelLogger,
+				Logger:              slog.New(slog.DiscardHandler),
+				Enricher:            istio.NewEnricher(cl),
+			})
+
+			_, err := scraper.Export(context.Background(), otlpRequest(otlpRecord(tc.attrs, unixNano)))
+			require.NoError(t, err)
+
+			require.Equal(t, []violation.Observation{tc.want}, buffer.Drain())
+			require.Len(t, otelLogger.emitted, 1)
 		})
 	}
 }

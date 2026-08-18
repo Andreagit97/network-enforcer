@@ -36,7 +36,11 @@ func testObservation() Observation {
 				OwnerName: "http-client-1",
 				Identity:  "spiffe://cluster.local/ns/default/sa/http-client-sa",
 			},
-			Dest:     securityv1alpha1.WorkloadRef{Namespace: "default", OwnerName: "http-server-1"},
+			Dest: securityv1alpha1.WorkloadRef{
+				Namespace: "default",
+				OwnerName: "http-server-1",
+				Identity:  "cluster.local/ns/default/sa/http-server-sa",
+			},
 			Protocol: corev1.ProtocolTCP,
 			DstPort:  80,
 			Action:   securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
@@ -44,10 +48,6 @@ func testObservation() Observation {
 	}
 }
 
-// TestObservationCarriesViolationInfo verifies the in-flight observation
-// embeds the same fields as the persisted ViolationRecord (via ViolationInfo,
-// i.e. the record without the ID) instead of introducing provider-shaped
-// parallel types. The controller adds the ID when persisting the record.
 func TestObservationCarriesViolationInfo(t *testing.T) {
 	obs := testObservation()
 
@@ -58,9 +58,6 @@ func TestObservationCarriesViolationInfo(t *testing.T) {
 	require.Equal(t, "spiffe://cluster.local/ns/default/sa/http-client-sa", obs.Source.Identity)
 }
 
-// TestEmitOtelLogSchema pins the canonical OTel attribute schema shared by all
-// providers: enforcement.*, source.workload.*, destination.workload.*,
-// network.transport, destination.port and policy.ref.*.
 func TestEmitOtelLogSchema(t *testing.T) {
 	logger := &fakeOtelLogger{}
 
@@ -78,11 +75,13 @@ func TestEmitOtelLogSchema(t *testing.T) {
 	})
 
 	require.Equal(t, "istio", attrs["enforcement.provider"])
+	require.Equal(t, "monitor", attrs["action"])
 	require.Equal(t, "http-client-1", attrs["source.workload.name"])
 	require.Equal(t, "default", attrs["source.workload.namespace"])
 	require.Equal(t, "spiffe://cluster.local/ns/default/sa/http-client-sa", attrs["source.workload.identity"])
 	require.Equal(t, "http-server-1", attrs["destination.workload.name"])
 	require.Equal(t, "default", attrs["destination.workload.namespace"])
+	require.Equal(t, "cluster.local/ns/default/sa/http-server-sa", attrs["destination.workload.identity"])
 	require.Equal(t, "TCP", attrs["network.transport"])
 	require.Equal(t, "80", attrs["destination.port"])
 	require.Equal(t, "default", attrs["policy.ref.namespace"])
@@ -98,8 +97,6 @@ func TestEmitOtelLogSchema(t *testing.T) {
 	require.NotPanics(t, func() { EmitOtelLog(context.Background(), nil, obs) })
 }
 
-// TestEmitOtelLogAllowMiss pins the allow-miss representation: no denying
-// policy is fabricated (the policy fields stay empty).
 func TestEmitOtelLogAllowMiss(t *testing.T) {
 	logger := &fakeOtelLogger{}
 

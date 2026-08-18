@@ -94,11 +94,18 @@ type ViolationInfo struct {
 	DstPort int32 `json:"dstPort,omitempty"`
 	// Action is the enforcement action taken (monitor or protect).
 	Action WorkloadNetworkPolicyMode `json:"action"`
-	// DenyingPolicyNamespace is the namespace of the NetworkPolicy that denied
-	// the flow.
+	// DenyingPolicyNamespace is the namespace of the WorkloadNetworkPolicy this
+	// violation belongs to. For a DENY it is the policy that denied the flow; for
+	// an ALLOW-miss (which carries no denying policy on the wire) the scraper
+	// resolves the owning WorkloadNetworkPolicy by matching the destination pod's
+	// labels against WNP selectors and records it here (see istio.Enricher).
 	// +optional
 	DenyingPolicyNamespace string `json:"denyingPolicyNamespace,omitempty"`
-	// DenyingPolicyName is the name of the NetworkPolicy that denied the flow.
+	// DenyingPolicyName is the name of the WorkloadNetworkPolicy this violation
+	// belongs to. For a DENY it is the policy that denied the flow; for an
+	// ALLOW-miss it is the owning WorkloadNetworkPolicy resolved by selector match
+	// (see DenyingPolicyNamespace). The controller keys the violation to its WNP
+	// by this name for both cases; Action (monitor vs protect) distinguishes them.
 	// +optional
 	DenyingPolicyName string `json:"denyingPolicyName,omitempty"`
 }
