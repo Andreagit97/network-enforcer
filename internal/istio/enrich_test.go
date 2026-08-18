@@ -20,11 +20,10 @@ func TestResolveSourceWorkload(t *testing.T) {
 		objs []client.Object
 		// enricher overrides the default enricher (built from objs) for cases that
 		// need an erroring client.
-		enricher       *Enricher
-		obs            violation.Observation
-		wantErr        bool
-		wantApplicable bool
-		wantSource     securityv1alpha1.WorkloadRef
+		enricher   *Enricher
+		obs        violation.Observation
+		wantErr    bool
+		wantSource securityv1alpha1.WorkloadRef
 	}{
 		{
 			name: "IP resolves to one deployment pod",
@@ -36,7 +35,6 @@ func TestResolveSourceWorkload(t *testing.T) {
 					Source: securityv1alpha1.WorkloadRef{OwnerName: "10.244.0.2:40422"},
 				},
 			},
-			wantApplicable: true,
 			wantSource: securityv1alpha1.WorkloadRef{
 				Namespace: "team-a",
 				OwnerKind: "Deployment",
@@ -54,7 +52,6 @@ func TestResolveSourceWorkload(t *testing.T) {
 					Source: securityv1alpha1.WorkloadRef{OwnerName: "10.244.0.3:1234"},
 				},
 			},
-			wantApplicable: true,
 			wantSource: securityv1alpha1.WorkloadRef{
 				Namespace: "team-b",
 				OwnerKind: "Pod",
@@ -70,8 +67,7 @@ func TestResolveSourceWorkload(t *testing.T) {
 					Source: securityv1alpha1.WorkloadRef{OwnerName: "10.244.9.9:5555"},
 				},
 			},
-			wantErr:        true,
-			wantApplicable: false,
+			wantErr: true,
 		},
 		{
 			name: "IP resolves to multiple pods is an error",
@@ -84,18 +80,17 @@ func TestResolveSourceWorkload(t *testing.T) {
 					Source: securityv1alpha1.WorkloadRef{OwnerName: "10.244.0.5:9000"},
 				},
 			},
-			wantErr:        true,
-			wantApplicable: false,
+			wantErr: true,
 		},
 		{
-			name: "source name is not ip:port",
+			name: "source name is not ip:port is an error",
 			objs: nil,
 			obs: violation.Observation{
 				ViolationInfo: securityv1alpha1.ViolationInfo{
 					Source: securityv1alpha1.WorkloadRef{OwnerName: "some-workload"},
 				},
 			},
-			wantApplicable: false,
+			wantErr: true,
 		},
 		{
 			name:     "list error is returned to caller",
@@ -105,8 +100,7 @@ func TestResolveSourceWorkload(t *testing.T) {
 					Source: securityv1alpha1.WorkloadRef{OwnerName: "10.244.0.2:40422"},
 				},
 			},
-			wantErr:        true,
-			wantApplicable: false,
+			wantErr: true,
 		},
 	}
 
@@ -118,15 +112,12 @@ func TestResolveSourceWorkload(t *testing.T) {
 			if e == nil {
 				e = newEnricherWithObjects(c.objs...)
 			}
-			src, applicable, err := e.resolveSourceWorkload(context.Background(), c.obs)
+			src, err := e.resolveSourceWorkload(context.Background(), c.obs)
 
 			if c.wantErr {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
-			}
-			assert.Equal(t, c.wantApplicable, applicable)
-			if c.wantApplicable {
 				assert.Equal(t, c.wantSource, src)
 			}
 		})
@@ -146,7 +137,7 @@ func TestResolveOwningPolicy(t *testing.T) {
 		// enricher overrides the default enricher (built from objs) for the
 		// list-error case.
 		enricher *Enricher
-		wantOK   bool
+		wantErr  bool
 		wantNS   string
 		wantName string
 	}{
@@ -158,7 +149,6 @@ func TestResolveOwningPolicy(t *testing.T) {
 				istioWNP("ns-dst", "user-named-wnp", map[string]string{"app": "frontend"}),
 				istioWNP("other-ns", "decoy-wnp", map[string]string{"app": "frontend"}),
 			},
-			wantOK:   true,
 			wantNS:   "ns-dst",
 			wantName: "user-named-wnp",
 		},
@@ -169,7 +159,6 @@ func TestResolveOwningPolicy(t *testing.T) {
 			objs: []client.Object{
 				kubernetesWNP("ns-dst", "k8s-wnp", map[string]string{"app": "frontend"}),
 			},
-			wantOK: false,
 		},
 		{
 			name: "multiple matching WNPs pick the first sorted by name",
@@ -177,7 +166,6 @@ func TestResolveOwningPolicy(t *testing.T) {
 				istioWNP("ns-dst", "bbb-wnp", map[string]string{"app": "frontend"}),
 				istioWNP("ns-dst", "aaa-wnp", map[string]string{"app": "frontend"}),
 			},
-			wantOK:   true,
 			wantNS:   "ns-dst",
 			wantName: "aaa-wnp",
 		},
@@ -186,19 +174,17 @@ func TestResolveOwningPolicy(t *testing.T) {
 			objs: []client.Object{
 				istioWNP("ns-dst", "catch-all", map[string]string{}),
 			},
-			wantOK: false,
 		},
 		{
 			name: "no WNP selects the pod",
 			objs: []client.Object{
 				istioWNP("ns-dst", "other-wnp", map[string]string{"app": "other"}),
 			},
-			wantOK: false,
 		},
 		{
-			name:     "list error reports no owner",
+			name:     "list error is returned to caller",
 			enricher: newEnricherWithListError(),
-			wantOK:   false,
+			wantErr:  true,
 		},
 	}
 
@@ -210,12 +196,14 @@ func TestResolveOwningPolicy(t *testing.T) {
 			if e == nil {
 				e = newEnricherWithObjects(c.objs...)
 			}
-			ns, name, ok := e.resolveOwningPolicy(context.Background(), newTestLogger(), "ns-dst", pod)
+			owner, err := e.resolveOwningPolicy(context.Background(), newTestLogger(), pod)
 
-			assert.Equal(t, c.wantOK, ok)
-			if c.wantOK {
-				assert.Equal(t, c.wantNS, ns)
-				assert.Equal(t, c.wantName, name)
+			if c.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, c.wantNS, owner.Namespace)
+				assert.Equal(t, c.wantName, owner.Name)
 			}
 		})
 	}

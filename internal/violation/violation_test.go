@@ -48,10 +48,6 @@ func testObservation() Observation {
 	}
 }
 
-// TestObservationCarriesViolationInfo verifies the in-flight observation
-// embeds the same fields as the persisted ViolationRecord (via ViolationInfo,
-// i.e. the record without the ID) instead of introducing provider-shaped
-// parallel types. The controller adds the ID when persisting the record.
 func TestObservationCarriesViolationInfo(t *testing.T) {
 	obs := testObservation()
 
@@ -62,9 +58,6 @@ func TestObservationCarriesViolationInfo(t *testing.T) {
 	require.Equal(t, "spiffe://cluster.local/ns/default/sa/http-client-sa", obs.Source.Identity)
 }
 
-// TestEmitOtelLogSchema pins the canonical OTel attribute schema shared by all
-// providers: enforcement.provider, action, source.workload.*,
-// destination.workload.*, network.transport, destination.port and policy.ref.*.
 func TestEmitOtelLogSchema(t *testing.T) {
 	logger := &fakeOtelLogger{}
 
@@ -104,10 +97,6 @@ func TestEmitOtelLogSchema(t *testing.T) {
 	require.NotPanics(t, func() { EmitOtelLog(context.Background(), nil, obs) })
 }
 
-// TestEmitOtelLogAllowMiss pins that empty policy-ref fields are omitted rather
-// than emitted as blanks. An observation reaches EmitOtelLog before correlation,
-// so an ALLOW-miss whose owning WNP has not been resolved carries empty policy
-// fields; the emit must not fabricate a policy.ref attribute for it.
 func TestEmitOtelLogAllowMiss(t *testing.T) {
 	logger := &fakeOtelLogger{}
 

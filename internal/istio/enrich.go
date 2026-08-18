@@ -8,6 +8,7 @@ package istio
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -73,52 +74,61 @@ func (e *Enricher) Enrich(
 		return obs
 	}
 
-	if src, applicable, err := e.resolveSourceWorkload(ctx, obs); err != nil {
+	if src, err := e.resolveSourceWorkload(ctx, obs); err != nil {
 		logger.ErrorContext(ctx, "Failed to resolve violation source workload", "error", err)
-	} else if applicable {
+	} else {
 		obs.Source = src
 	}
 
-	return e.enrichDest(ctx, logger, obs)
+	// The destination workload and its owning WNP both derive from a single pod
+	// fetch, so resolve the pod once and reuse it for both.
+	if dstPod, err := e.resolveDestWorkload(ctx, obs); err != nil {
+		logger.ErrorContext(ctx, "Failed to resolve violation destination workload", "error", err)
+	} else {
+		obs.Dest = workloadRefFromPod(dstPod)
+
+		// A WNP violation is always an ALLOW-miss: the event carries no denying
+		// policy, so the owning WNP is not knowable from it. Resolve it by matching
+		// the destination pod's labels against WNP selectors and record it in the
+		// DenyingPolicy fields, which for an ALLOW-miss carry the *owning*
+		// (selector-matched) WNP rather than a policy that literally denied the
+		// flow. The controller then correlates by name.
+		if owner, ownerErr := e.resolveOwningPolicy(ctx, logger, dstPod); ownerErr != nil {
+			logger.ErrorContext(ctx,
+				"Failed to resolve owning WorkloadNetworkPolicy for ALLOW-miss correlation",
+				"error", ownerErr)
+		} else if owner.Name != "" {
+			obs.DenyingPolicyNamespace = owner.Namespace
+			obs.DenyingPolicyName = owner.Name
+		}
+	}
+
+	return obs
 }
 
-// enrichDest resolves the destination pod to its owning workload and to the
-// WorkloadNetworkPolicy that selects it (WNP violations are always ALLOW-miss).
-// Both use the same pod fetch. On a miss the observation keeps its
-// scraper-derived destination, and the owning WNP is left unresolved so the
-// controller drops the (uncorrelatable) violation.
-func (e *Enricher) enrichDest(
+// resolveDestWorkload fetches the destination pod named in the observation so the
+// caller can resolve its owning workload and the WorkloadNetworkPolicy that
+// selects it (both derive from the same pod).
+//
+// A non-nil error means there is no destination pod to resolve (the observation
+// carries no destination namespace or pod name) or the pod could not be fetched;
+// the caller logs it and keeps the scraper-derived destination.
+func (e *Enricher) resolveDestWorkload(
 	ctx context.Context,
-	logger *slog.Logger,
 	obs violation.Observation,
-) violation.Observation {
+) (*corev1.Pod, error) {
 	dstNamespace := obs.Dest.Namespace
 	dstPod := obs.Dest.OwnerName
 	if dstNamespace == "" || dstPod == "" {
-		return obs
+		return nil, errors.New("observation has no destination pod to resolve")
 	}
 
 	var pod corev1.Pod
 	if err := e.client.Get(ctx, types.NamespacedName{Namespace: dstNamespace, Name: dstPod}, &pod); err != nil {
-		logger.ErrorContext(ctx, "Failed to fetch violation destination pod, keeping raw destination",
-			"namespace", dstNamespace, "pod", dstPod, "error", err)
-		return obs
+		return nil, fmt.Errorf("fetching destination pod %s/%s: %w", dstNamespace, dstPod, err)
 	}
 
-	obs.Dest = workloadRefFromPod(&pod)
-
-	// A WNP violation is always an ALLOW-miss: the event carries no denying policy,
-	// so the owning WNP is not knowable from it. Resolve it here by matching the
-	// destination pod's labels against WNP selectors and record it in the
-	// DenyingPolicy fields, which for an ALLOW-miss carry the *owning*
-	// (selector-matched) WNP rather than a policy that literally denied the flow.
-	// The controller then correlates by name.
-	if ns, name, ok := e.resolveOwningPolicy(ctx, logger, dstNamespace, &pod); ok {
-		obs.DenyingPolicyNamespace = ns
-		obs.DenyingPolicyName = name
-	}
-
-	return obs
+	return &pod, nil
 }
 
 // resolveOwningPolicy finds the WorkloadNetworkPolicy that owns the destination
@@ -126,19 +136,19 @@ func (e *Enricher) enrichDest(
 // selector. Reconstructing the WNP name is not possible because users may name
 // their WNPs freely, so we search instead.
 //
-// It reports false when no WNP selects the pod (or the list fails); the caller
-// then leaves the owning policy unresolved.
+// It returns the owning policy as a types.NamespacedName, or the zero value when
+// no WNP selects the pod. A non-nil error means the WNP list could not be
+// retrieved; the caller logs it and leaves the owning policy unresolved.
 func (e *Enricher) resolveOwningPolicy(
 	ctx context.Context,
 	logger *slog.Logger,
-	namespace string,
 	pod *corev1.Pod,
-) (string, string, bool) {
+) (types.NamespacedName, error) {
+	namespace := pod.Namespace
+
 	var wnpList securityv1alpha1.WorkloadNetworkPolicyList
 	if err := e.client.List(ctx, &wnpList, client.InNamespace(namespace)); err != nil {
-		logger.ErrorContext(ctx, "Failed to list WorkloadNetworkPolicies for ALLOW-miss correlation",
-			"namespace", namespace, "error", err)
-		return "", "", false
+		return types.NamespacedName{}, fmt.Errorf("listing WorkloadNetworkPolicies in namespace %s: %w", namespace, err)
 	}
 
 	podLabels := labels.Set(pod.Labels)
@@ -155,6 +165,10 @@ func (e *Enricher) resolveOwningPolicy(
 		}
 		sel, err := metav1.LabelSelectorAsSelector(selector)
 		if err != nil {
+			// A malformed selector cannot match; skip this WNP and keep searching the
+			// rest rather than failing the whole correlation. The selector is a
+			// user-authored CRD field, so surface the bad one instead of silently
+			// dropping it.
 			logger.ErrorContext(ctx, "Invalid selector on WorkloadNetworkPolicy",
 				"policy", wnp.Name, "error", err)
 			continue
@@ -163,7 +177,7 @@ func (e *Enricher) resolveOwningPolicy(
 			// An empty selector matches every pod. Treating it as a match would
 			// let a mis-configured WNP capture ALLOW-miss violations for unrelated
 			// workloads in the namespace, so skip it and never correlate by it.
-			logger.InfoContext(ctx, "WorkloadNetworkPolicy has an empty selector; skipping for ALLOW-miss correlation",
+			logger.WarnContext(ctx, "Skipping WorkloadNetworkPolicy with empty selector",
 				"policy", wnp.Name)
 			continue
 		}
@@ -174,21 +188,14 @@ func (e *Enricher) resolveOwningPolicy(
 
 	switch len(matches) {
 	case 0:
-		logger.InfoContext(ctx, "No WorkloadNetworkPolicy selects the ALLOW-miss violation destination pod",
-			"namespace", namespace, "pod", pod.Name)
-		return "", "", false
+		return types.NamespacedName{}, nil
 	case 1:
-		return namespace, matches[0], true
+		return types.NamespacedName{Namespace: namespace, Name: matches[0]}, nil
 	default:
+		// Overlapping selectors matched more than one WNP; pick the first by name so
+		// the choice is deterministic across events.
 		sort.Strings(matches)
-		logger.InfoContext(
-			ctx,
-			"Multiple WorkloadNetworkPolicies select the ALLOW-miss violation destination pod; using the first",
-			"namespace", namespace,
-			"pod", pod.Name,
-			"selected", matches[0],
-		)
-		return namespace, matches[0], true
+		return types.NamespacedName{Namespace: namespace, Name: matches[0]}, nil
 	}
 }
 
@@ -202,15 +209,16 @@ func wnpIstioSelector(wnp *securityv1alpha1.WorkloadNetworkPolicy) (*metav1.Labe
 	return nil, false
 }
 
-// peerIPFromAddr extracts the host from an Istio peer `ip:port` address. A false
-// result means the value is not an `ip:port` (so source resolution does not
-// apply); it is a valid no-op, not an error to propagate.
-func peerIPFromAddr(addr string) (string, bool) {
+// peerIPFromAddr extracts the host from an Istio peer `ip:port` address. Istio
+// emits this field in a precise `ip:port` form, so a value that does not parse
+// is an unexpected format change rather than a valid no-op: it is returned as an
+// error so the caller surfaces a clear failure instead of enriching silently.
+func peerIPFromAddr(addr string) (string, error) {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
-		return "", false
+		return "", fmt.Errorf("parsing source peer address %q: %w", addr, err)
 	}
-	return host, true
+	return host, nil
 }
 
 // spiffeIdentity builds the prefix-free Istio principal form for a pod's
@@ -227,14 +235,12 @@ func spiffeIdentity(namespace, serviceAccount string) string {
 // ztunnel and identifies the client only by `ip:port`, so the source is
 // resolved by listing pods on the status.podIP field index.
 //
-// A non-nil error means the peer IP could not be resolved to exactly one pod
-// (the List errored, no pod carries the IP, or several do — e.g. host-network
-// pods sharing the node IP); the caller keeps the scraper-derived source and logs
-// the failure once. When the error is nil, the bool reports whether resolution
-// applies to this record:
-//   - false: Source.OwnerName is not an `ip:port`, so there is nothing to
-//     resolve; the caller keeps the scraper-derived source.
-//   - true: the peer IP resolved to exactly one pod (the returned WorkloadRef).
+// A non-nil error means the source could not be resolved to exactly one pod: the
+// peer address was not in the expected `ip:port` form, the List errored, no pod
+// carries the IP, or several do (e.g. host-network pods sharing the node IP). In
+// every case the caller keeps the scraper-derived source and logs the failure
+// once. On success the returned WorkloadRef is the single pod the peer IP
+// resolved to.
 //
 // Because resolution is best-effort, the same logical flow can flip between
 // resolved and unresolved across events (pod churn / pod not yet cached), so a
@@ -243,31 +249,30 @@ func spiffeIdentity(namespace, serviceAccount string) string {
 func (e *Enricher) resolveSourceWorkload(
 	ctx context.Context,
 	obs violation.Observation,
-) (securityv1alpha1.WorkloadRef, bool, error) {
-	peerIP, ok := peerIPFromAddr(obs.Source.OwnerName)
-	if !ok {
-		// Not an `ip:port` source address; nothing to resolve.
-		return securityv1alpha1.WorkloadRef{}, false, nil
+) (securityv1alpha1.WorkloadRef, error) {
+	peerIP, err := peerIPFromAddr(obs.Source.OwnerName)
+	if err != nil {
+		return securityv1alpha1.WorkloadRef{}, err
 	}
 
 	var podList corev1.PodList
-	if err := e.client.List(ctx, &podList, client.MatchingFields{PodIPIndexField: peerIP}); err != nil {
-		return securityv1alpha1.WorkloadRef{}, false,
+	if err = e.client.List(ctx, &podList, client.MatchingFields{PodIPIndexField: peerIP}); err != nil {
+		return securityv1alpha1.WorkloadRef{},
 			fmt.Errorf("listing pods for source peer IP %s: %w", peerIP, err)
 	}
 
 	switch len(podList.Items) {
 	case 1:
-		return workloadRefFromPod(&podList.Items[0]), true, nil
+		return workloadRefFromPod(&podList.Items[0]), nil
 	case 0:
 		// The peer pod is not in the cache (not yet observed, already deleted, or
 		// host-networked). Surface it as an error so the caller logs it once.
-		return securityv1alpha1.WorkloadRef{}, false,
+		return securityv1alpha1.WorkloadRef{},
 			fmt.Errorf("no pod found for source peer IP %s", peerIP)
 	default:
 		// Multiple pods share the peer IP (e.g. host-network pods sharing the node
 		// IP); we cannot attribute the source to one of them.
-		return securityv1alpha1.WorkloadRef{}, false,
+		return securityv1alpha1.WorkloadRef{},
 			fmt.Errorf("%d pods found for source peer IP %s", len(podList.Items), peerIP)
 	}
 }
