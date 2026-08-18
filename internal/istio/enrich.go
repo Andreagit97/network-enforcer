@@ -136,9 +136,10 @@ func (e *Enricher) resolveDestWorkload(
 // selector. Reconstructing the WNP name is not possible because users may name
 // their WNPs freely, so we search instead.
 //
-// It returns the owning policy as a types.NamespacedName, or the zero value when
-// no WNP selects the pod. A non-nil error means the WNP list could not be
-// retrieved; the caller logs it and leaves the owning policy unresolved.
+// It returns the owning policy as a types.NamespacedName. A non-nil error means
+// the owning policy could not be resolved: the WNP list could not be retrieved,
+// or no WNP selects the pod. The caller logs it and leaves the owning policy
+// unresolved.
 func (e *Enricher) resolveOwningPolicy(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -188,13 +189,24 @@ func (e *Enricher) resolveOwningPolicy(
 
 	switch len(matches) {
 	case 0:
-		return types.NamespacedName{}, nil
+		return types.NamespacedName{}, fmt.Errorf(
+			"no WorkloadNetworkPolicy selects the ALLOW-miss violation destination pod '%s/%s'",
+			namespace,
+			pod.Name,
+		)
 	case 1:
 		return types.NamespacedName{Namespace: namespace, Name: matches[0]}, nil
 	default:
 		// Overlapping selectors matched more than one WNP; pick the first by name so
 		// the choice is deterministic across events.
 		sort.Strings(matches)
+		logger.WarnContext(
+			ctx,
+			"Multiple WorkloadNetworkPolicies select the ALLOW-miss violation destination pod; using the first",
+			"namespace", namespace,
+			"pod", pod.Name,
+			"selected", matches[0],
+		)
 		return types.NamespacedName{Namespace: namespace, Name: matches[0]}, nil
 	}
 }

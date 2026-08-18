@@ -297,6 +297,7 @@ func TestResolveOwningPolicy(t *testing.T) {
 			objs: []client.Object{
 				kubernetesWNP("ns-dst", "k8s-wnp", map[string]string{"app": "frontend"}),
 			},
+			wantErr: true,
 		},
 		{
 			name: "multiple matching WNPs pick the first sorted by name",
@@ -312,12 +313,14 @@ func TestResolveOwningPolicy(t *testing.T) {
 			objs: []client.Object{
 				istioWNP("ns-dst", "catch-all", map[string]string{}),
 			},
+			wantErr: true,
 		},
 		{
 			name: "no WNP selects the pod",
 			objs: []client.Object{
 				istioWNP("ns-dst", "other-wnp", map[string]string{"app": "other"}),
 			},
+			wantErr: true,
 		},
 		{
 			name:     "list error is returned to caller",
