@@ -352,7 +352,6 @@ func setupControllers(
 
 	conf.wnpStatusSyncConfig.EventLogger = eventLogger
 	conf.wnpStatusSyncConfig.ViolationBuffer = violationBuffer
-	conf.wnpStatusSyncConfig.Logger = logger
 	logger.InfoContext(ctx, "Setting up WorkloadNetworkPolicyStatusSync with",
 		"config", conf.wnpStatusSyncConfig)
 	wnpStatusSync, err := controller.NewWorkloadNetworkPolicyStatusSync(

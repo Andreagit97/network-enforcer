@@ -2,11 +2,12 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log/slog"
 	"sort"
 	"time"
 
+	"github.com/go-logr/logr"
 	otellog "go.opentelemetry.io/otel/log"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -15,9 +16,11 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
+	"github.com/rancher-sandbox/network-enforcer/internal/types/loglevel"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 )
 
@@ -34,7 +37,7 @@ type WorkloadNetworkPolicyStatusSync struct {
 
 	updateInterval  time.Duration
 	eventLogger     otellog.Logger
-	logger          *slog.Logger
+	logger          logr.Logger
 	violationBuffer *violation.Buffer
 }
 
@@ -43,8 +46,6 @@ type WorkloadNetworkPolicyStatusSyncConfig struct {
 	// EventLogger for OTLP policy_violation_acknowledged; nil = disabled.
 	EventLogger     otellog.Logger
 	ViolationBuffer *violation.Buffer
-	// Logger for the status sync; nil falls back to slog.Default.
-	Logger *slog.Logger
 }
 
 func NewWorkloadNetworkPolicyStatusSync(
@@ -60,27 +61,23 @@ func NewWorkloadNetworkPolicyStatusSync(
 		updateInterval:  config.UpdateInterval,
 		eventLogger:     config.EventLogger,
 		violationBuffer: config.ViolationBuffer,
-		logger:          config.Logger,
 	}, nil
 }
 
 // Start implements manager.Runnable. Runs the periodic sync loop.
 func (r *WorkloadNetworkPolicyStatusSync) Start(ctx context.Context) error {
-	if r.logger == nil {
-		r.logger = slog.Default()
-	}
-	r.logger = r.logger.With("component", "WorkloadNetworkPolicyStatusSync")
+	r.logger = log.FromContext(ctx).WithName("WorkloadNetworkPolicyStatusSync")
 	interval := r.updateInterval
-	r.logger.InfoContext(ctx, "Starting with", "interval", interval.String())
+	r.logger.Info("Starting with", "interval", interval.String())
 
 	for {
 		select {
 		case <-ctx.Done():
-			r.logger.InfoContext(ctx, "Closing")
+			r.logger.Info("Closing")
 			return nil
 		case <-time.After(interval):
 			if err := r.sync(ctx); err != nil {
-				r.logger.ErrorContext(ctx, "Failed to sync", "error", err)
+				r.logger.Error(err, "Failed to sync")
 			}
 		}
 	}
@@ -106,7 +103,7 @@ func (r *WorkloadNetworkPolicyStatusSync) sync(ctx context.Context) error {
 		return fmt.Errorf("failed to list WorkloadNetworkPolicies: %w", err)
 	}
 	if len(wnpList.Items) == 0 {
-		r.logger.DebugContext(ctx, "No WorkloadNetworkPolicies found, skipping sync")
+		r.logger.V(loglevel.VerbosityDebug).Info("No WorkloadNetworkPolicies found, skipping sync")
 		return nil
 	}
 
@@ -131,8 +128,7 @@ func (r *WorkloadNetworkPolicyStatusSync) sync(ctx context.Context) error {
 	// those without still get clearAllowedViolations + acknowledgeViolationsFromAnnotations.
 	for key, wnp := range wnpByKey {
 		if err = r.processWorkloadNetworkPolicy(ctx, wnp, violationsByWNP[key]); err != nil {
-			r.logger.ErrorContext(ctx, "Failed to process WorkloadNetworkPolicy",
-				"error", err,
+			r.logger.Error(err, "Failed to process WorkloadNetworkPolicy",
 				"policy", key)
 		}
 	}
@@ -210,12 +206,10 @@ func (r *WorkloadNetworkPolicyStatusSync) correlateViolationsToWNPs(
 		owner, ok := ownedIndex[wnpKey]
 		if ok && owner == nil {
 			// we have an error only in case of policy presence and without owner
-			r.logger.ErrorContext(
-				ctx,
+			err := errors.New(
 				"found a Network policy with same name of WNP but not managed by us, cannot register violation",
-				"denyingPolicy",
-				wnpKey.String(),
 			)
+			r.logger.Error(err, err.Error(), "denyingPolicy", wnpKey.String())
 			continue
 		}
 
@@ -252,8 +246,7 @@ func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForViolation(
 		Name:      v.DenyingPolicyName,
 	}
 	if _, ok := wnpByKey[wnpKey]; !ok {
-		r.logger.InfoContext(
-			ctx,
+		r.logger.Info(
 			"Denying WorkloadNetworkPolicy not found; violation may be caused by a policy not managed by us",
 			"denyingPolicy",
 			wnpKey.String(),
@@ -278,7 +271,7 @@ func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForDestWorkload(
 	dstNamespace := v.Dest.Namespace
 	dstPod := v.Dest.OwnerName
 	if dstNamespace == "" || dstPod == "" {
-		r.logger.InfoContext(ctx, "ALLOW-miss violation has no destination workload, cannot correlate")
+		r.logger.Info("ALLOW-miss violation has no destination workload, cannot correlate")
 		return types.NamespacedName{}, false
 	}
 
@@ -287,15 +280,13 @@ func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForDestWorkload(
 		if apierrors.IsNotFound(err) {
 			// The destination pod churned away before this sync cycle; expected
 			// and self-correcting, so keep it to the debug trace to avoid spam.
-			r.logger.DebugContext(
-				ctx,
+			r.logger.V(loglevel.VerbosityDebug).Info(
 				"Destination pod for ALLOW-miss violation no longer exists, cannot correlate",
 				"destNamespace", dstNamespace,
 				"destPod", dstPod,
 			)
 		} else {
-			r.logger.ErrorContext(ctx, "Failed to fetch destination pod for ALLOW-miss violation",
-				"error", err,
+			r.logger.Error(err, "Failed to fetch destination pod for ALLOW-miss violation",
 				"destNamespace", dstNamespace,
 				"destPod", dstPod,
 			)
@@ -319,20 +310,14 @@ func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForDestWorkload(
 		}
 		sel, err := metav1.LabelSelectorAsSelector(selector)
 		if err != nil {
-			r.logger.ErrorContext(
-				ctx,
-				"Invalid selector on WorkloadNetworkPolicy",
-				"error", err,
-				"policy", key.String(),
-			)
+			r.logger.Error(err, "Invalid selector on WorkloadNetworkPolicy", "policy", key.String())
 			continue
 		}
 		if sel.Empty() {
 			// An empty selector matches every pod. Treating it as a match would
 			// let a mis-configured WNP capture ALLOW-miss violations for unrelated
 			// workloads in the namespace, so skip it and never correlate by it.
-			r.logger.InfoContext(
-				ctx,
+			r.logger.Info(
 				"WorkloadNetworkPolicy has an empty selector; skipping for ALLOW-miss correlation",
 				"policy", key.String(),
 			)
@@ -345,8 +330,7 @@ func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForDestWorkload(
 
 	switch len(matches) {
 	case 0:
-		r.logger.InfoContext(
-			ctx,
+		r.logger.Info(
 			"No WorkloadNetworkPolicy selects the ALLOW-miss violation destination pod",
 			"destNamespace", dstNamespace,
 			"destPod", dstPod,
@@ -356,8 +340,7 @@ func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForDestWorkload(
 		return matches[0], true
 	default:
 		sort.Slice(matches, func(i, j int) bool { return matches[i].String() < matches[j].String() })
-		r.logger.InfoContext(
-			ctx,
+		r.logger.Info(
 			"Multiple WorkloadNetworkPolicies select the ALLOW-miss violation destination pod; using the first",
 			"destNamespace", dstNamespace,
 			"destPod", dstPod,
@@ -399,7 +382,7 @@ func (r *WorkloadNetworkPolicyStatusSync) processWorkloadNetworkPolicy(
 
 	acknowledged := newPolicy.RecomputeStatus(violations, now)
 
-	r.logger.DebugContext(ctx, "Updating WorkloadNetworkPolicy status",
+	r.logger.V(loglevel.VerbosityDebug).Info("Updating WorkloadNetworkPolicy status",
 		"policy", wnp.NamespacedName(),
 		"violations", len(violations),
 		"acknowledged", len(acknowledged),
