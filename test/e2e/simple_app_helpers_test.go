@@ -168,18 +168,6 @@ func execInSimpleClientDeploymentRaw(
 	return stdout.String(), stderr.String(), err
 }
 
-func execInSimpleClientDeployment(
-	ctx context.Context,
-	t *testing.T,
-	command []string,
-) (string, string) {
-	t.Helper()
-
-	stdout, stderr, err := execInSimpleClientDeploymentRaw(ctx, command)
-	require.NoError(t, err, "failed executing command in deployment %q: %v", simpleAppClientDeploymentName, err)
-	return stdout, stderr
-}
-
 // assertPacketSentFromClient sends a payload to the simple app service on the
 // given port and asserts the echo comes back (traffic allowed).
 func assertPacketSentFromClient(
@@ -191,7 +179,8 @@ func assertPacketSentFromClient(
 	t.Helper()
 
 	payload, cmd := getProtoCmd(proto, port)
-	stdout, stderr := execInSimpleClientDeployment(ctx, t, cmd)
+	stdout, stderr, err := execInSimpleClientDeploymentRaw(ctx, cmd)
+	require.NoError(t, err, "failed executing command in deployment %q: %v", simpleAppClientDeploymentName, err)
 	require.Empty(t, stderr)
 	require.Contains(t, stdout, payload, "client output should contain echoed payload")
 	return ctx
