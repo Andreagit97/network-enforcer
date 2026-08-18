@@ -187,20 +187,32 @@ func labelNamespaceAmbient(ctx context.Context, t *testing.T, _ *envconf.Config)
 	return ctx
 }
 
-// TestIstioLearningFlow is the smoke test for the Istio path: it validates the
-// whole learning data path (ztunnel access log → istio-fluent-bit → OTLP →
-// istio scraper → learning controller → WorkloadNetworkPolicyProposal) with a
-// single TCP connection between two in-mesh workloads.
-func TestIstioLearningFlow(t *testing.T) {
-	feature := features.New("Istio ambient learning").
+// TestIstioFlow is the smoke test for the Istio path: it validates the whole
+// learning data path (ztunnel access log → istio-fluent-bit → OTLP → istio
+// scraper → learning controller → WorkloadNetworkPolicyProposal) with a single
+// TCP connection between two in-mesh workloads, then exercises the full policy
+// lifecycle on the learned proposal: promotion to a monitor policy (dry-run
+// AuthorizationPolicy, violations observed but traffic allowed), followed by
+// the switch to protect mode (real enforcement, violating traffic blocked and
+// recorded as a violation).
+func TestIstioFlow(t *testing.T) {
+	feature := features.New("Istio ambient learning, monitor and protect").
 		Setup(setupTestNamespace).
 		Setup(labelNamespaceAmbient).
 		Setup(setupSimpleAppWorkload).
-		Assess("Send TCP traffic to the service",
+		Assess("Learn the client to server flow",
 			func(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
-				return assertPacketSentFromClient(ctx, t, corev1.ProtocolTCP)
+				return assertPacketSentFromClient(ctx, t, corev1.ProtocolTCP, simpleAppTCPServicePort)
 			}).
 		Assess("Check the Istio ingress proposal is generated", assessIstioProposalGenerated).
+		Assess("Promote the proposal to a monitor policy", promoteIstioProposalToMonitor).
+		Assess("Check the monitor AuthorizationPolicy", checkIstioAuthorizationPolicy(v1alpha1.WorkloadNetworkPolicyModeMonitor)).
+		Assess("Matching traffic is still allowed in monitor mode", matchingTrafficAllowed).
+		Assess("Violating traffic is observed in monitor mode", violatingTrafficObserved).
+		Assess("Switch the policy to protect mode", switchIstioPolicyToProtect).
+		Assess("Check the protect AuthorizationPolicy", checkIstioAuthorizationPolicy(v1alpha1.WorkloadNetworkPolicyModeProtect)).
+		Assess("Matching traffic is still allowed in protect mode", matchingTrafficAllowed).
+		Assess("Violating traffic is blocked in protect mode", violatingTrafficBlocked).
 		Teardown(teardownSimpleAppWorkload).
 		Teardown(teardownTestNamespace).
 		Feature()

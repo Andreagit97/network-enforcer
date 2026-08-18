@@ -1,9 +1,7 @@
 package e2e_test
 
 import (
-	"bytes"
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,47 +15,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
-	"sigs.k8s.io/e2e-framework/pkg/features"
 )
 
 // istioIngressProposalName is the name of the learned ingress proposal for the
 // server workload (Istio ambient only produces ingress proposals).
 const istioIngressProposalName = "deployment-" + simpleAppServerDeploymentName + "-ingress"
-
-// simpleAppViolatingServerPort is a TCP port the server listens on that is NOT
-// part of the learned policy. Traffic to it violates the policy: in monitor
-// mode it is observed (dry-run) and still flows, in protect mode it is blocked.
-const simpleAppViolatingServerPort = int32(18082)
-
-// TestIstioMonitorProtectFlow exercises the full Istio lifecycle: after the
-// learning phase produces a proposal, it promotes it to a monitor policy
-// (dry-run AuthorizationPolicy, violations observed but traffic allowed) and
-// then to protect mode (real enforcement, violating traffic blocked and
-// recorded as a violation).
-func TestIstioMonitorProtectFlow(t *testing.T) {
-	feature := features.New("Istio ambient monitor and protect").
-		Setup(setupTestNamespace).
-		Setup(labelNamespaceAmbient).
-		Setup(setupSimpleAppWorkload).
-		Assess("Learn the client to server flow",
-			func(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
-				return assertPacketSentFromClient(ctx, t, corev1.ProtocolTCP)
-			}).
-		Assess("Check the Istio ingress proposal is generated", assessIstioProposalGenerated).
-		Assess("Promote the proposal to a monitor policy", promoteIstioProposalToMonitor).
-		Assess("Check the monitor AuthorizationPolicy", checkIstioAuthorizationPolicy(v1alpha1.WorkloadNetworkPolicyModeMonitor)).
-		Assess("Matching traffic is still allowed in monitor mode", matchingTrafficAllowed).
-		Assess("Violating traffic is observed in monitor mode", violatingTrafficObserved).
-		Assess("Switch the policy to protect mode", switchIstioPolicyToProtect).
-		Assess("Check the protect AuthorizationPolicy", checkIstioAuthorizationPolicy(v1alpha1.WorkloadNetworkPolicyModeProtect)).
-		Assess("Matching traffic is still allowed in protect mode", matchingTrafficAllowed).
-		Assess("Violating traffic is blocked in protect mode", violatingTrafficBlocked).
-		Teardown(teardownSimpleAppWorkload).
-		Teardown(teardownTestNamespace).
-		Feature()
-
-	testEnv.Test(t, feature)
-}
 
 // promoteIstioProposalToMonitor promotes the learned proposal into a
 // WorkloadNetworkPolicy in monitor mode and waits for the proposal to be
@@ -75,11 +37,21 @@ func promoteIstioProposalToMonitor(ctx context.Context, t *testing.T, _ *envconf
 	require.NoError(t, client.Update(ctx, &proposal),
 		"failed to promote proposal %q to monitor mode", proposal.NamespacedName().String())
 
+	var policy v1alpha1.WorkloadNetworkPolicy
 	require.Eventually(t, func() bool {
-		var policy v1alpha1.WorkloadNetworkPolicy
 		return client.WithNamespace(namespace).Get(ctx, istioIngressProposalName, namespace, &policy) == nil
 	}, defaultOperationTimeout, 1*time.Second,
 		"WorkloadNetworkPolicy %q was not created after promotion", istioIngressProposalName)
+
+	// Check the promoted policy specs are correct: it must carry the
+	// promotion provenance label, run in monitor mode, and be a faithful copy
+	// of the proposal backend spec.
+	require.True(t, policy.HasPromotedLabel(proposal.Name),
+		"policy should carry the promoted-from label %q", proposal.Name)
+	require.Equal(t, v1alpha1.WorkloadNetworkPolicyModeMonitor, policy.Spec.Mode,
+		"promoted policy mode does not match expected")
+	require.Equal(t, proposal.Spec.PolicyBackendSpec, policy.Spec.PolicyBackendSpec,
+		"promoted policy backend spec does not match the proposal")
 
 	require.Eventually(t, func() bool {
 		var p v1alpha1.WorkloadNetworkPolicyProposal
@@ -109,8 +81,14 @@ func checkIstioAuthorizationPolicy(
 				t.Logf("AuthorizationPolicy %q not available yet: %v", istioIngressProposalName, err)
 				return false
 			}
-			_, hasDryRun := ap.Annotations[annotation.IoIstioDryRun.Name]
-			return (mode == v1alpha1.WorkloadNetworkPolicyModeMonitor) == hasDryRun
+			// The dry-run annotation is the reconciliation marker for monitor
+			// mode: presence (and value, when present) is asserted here so the
+			// annotation checks stay in a single place.
+			dryRun, hasDryRun := ap.Annotations[annotation.IoIstioDryRun.Name]
+			if mode == v1alpha1.WorkloadNetworkPolicyModeMonitor {
+				return hasDryRun && dryRun == "true"
+			}
+			return !hasDryRun
 		}, defaultOperationTimeout, 1*time.Second,
 			"AuthorizationPolicy %q is not in the expected %q state", istioIngressProposalName, mode)
 
@@ -136,14 +114,6 @@ func checkIstioAuthorizationPolicy(
 			rule.GetTo()[0].GetOperation().GetPorts(),
 			"rule ports do not match expected",
 		)
-
-		if mode == v1alpha1.WorkloadNetworkPolicyModeMonitor {
-			require.Equal(t, "true", ap.Annotations[annotation.IoIstioDryRun.Name],
-				"monitor AuthorizationPolicy should carry the dry-run annotation")
-		} else {
-			require.NotContains(t, ap.Annotations, annotation.IoIstioDryRun.Name,
-				"protect AuthorizationPolicy should not carry the dry-run annotation")
-		}
 		return ctx
 	}
 }
@@ -152,21 +122,15 @@ func checkIstioAuthorizationPolicy(
 // learned (policy-allowed) port.
 func matchingTrafficAllowed(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
 	t.Helper()
-	return assertPacketSentFromClient(ctx, t, corev1.ProtocolTCP)
+	return assertPacketSentFromClient(ctx, t, corev1.ProtocolTCP, simpleAppTCPServicePort)
 }
 
-// violatingTrafficObserved sends TCP traffic to a port the policy does not
-// allow: in monitor (dry-run) mode the traffic still flows, and the rejection
-// is recorded as a monitor violation on the policy.
+// violatingTrafficObserved sends TCP traffic to the service port the policy
+// does not allow: in monitor (dry-run) mode the traffic still flows, and the
+// rejection is recorded as a monitor violation on the policy.
 func violatingTrafficObserved(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
 	t.Helper()
-	serverPodIP := getServerPodIP(ctx, t)
-
-	require.Eventually(t, func() bool {
-		stdout, err := trySendViolatingTraffic(ctx, t, serverPodIP)
-		return err == nil && strings.Contains(stdout, violatingPayload)
-	}, defaultOperationTimeout, 1*time.Second,
-		"violating traffic should still flow in monitor (dry-run) mode")
+	assertPacketSentFromClient(ctx, t, corev1.ProtocolTCP, simpleAppViolatingServicePort)
 
 	assertViolationWithAction(ctx, t, v1alpha1.WorkloadNetworkPolicyModeMonitor)
 	return ctx
@@ -191,83 +155,16 @@ func switchIstioPolicyToProtect(ctx context.Context, t *testing.T, _ *envconf.Co
 	return ctx
 }
 
-// violatingTrafficBlocked asserts TCP traffic to the non-policy port is now
-// blocked by the enforced AuthorizationPolicy and recorded as a protect
-// violation. The destination ztunnel rejects the connection, but the
+// violatingTrafficBlocked asserts TCP traffic to the non-policy service port
+// is now blocked by the enforced AuthorizationPolicy and recorded as a
+// protect violation. The destination ztunnel rejects the connection, but the
 // client-side nc may still exit 0: the reliable signal is the missing echo.
 func violatingTrafficBlocked(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
 	t.Helper()
-	serverPodIP := getServerPodIP(ctx, t)
-
-	require.Eventually(t, func() bool {
-		stdout, err := trySendViolatingTraffic(ctx, t, serverPodIP)
-		if strings.Contains(stdout, violatingPayload) {
-			t.Logf("violating traffic still echoed in protect mode (err=%v)", err)
-			return false
-		}
-		return true
-	}, defaultOperationTimeout, 1*time.Second,
-		"violating traffic should be blocked in protect mode")
+	assertPacketBlockedFromClient(ctx, t, corev1.ProtocolTCP, simpleAppViolatingServicePort)
 
 	assertViolationWithAction(ctx, t, v1alpha1.WorkloadNetworkPolicyModeProtect)
 	return ctx
-}
-
-const violatingPayload = "violating-e2e-payload"
-
-// trySendViolatingTraffic sends a TCP payload to the server pod on the
-// violating port. It returns the exec error so callers can distinguish allowed
-// (no error, echoed payload) from blocked (error) traffic.
-func trySendViolatingTraffic(
-	ctx context.Context,
-	t *testing.T,
-	serverPodIP string,
-) (string, error) {
-	t.Helper()
-	cmd := []string{
-		"sh",
-		"-c",
-		fmt.Sprintf(
-			"printf %s | nc -w 2 %s %d",
-			strconv.Quote(violatingPayload),
-			serverPodIP,
-			simpleAppViolatingServerPort,
-		),
-	}
-
-	namespace := getNamespace(ctx)
-	r := getSecurityV1Alpha1Client(ctx)
-	var stdout, stderr bytes.Buffer
-
-	execCtx, cancel := context.WithTimeout(ctx, defaultPodExecTimeout)
-	defer cancel()
-
-	err := r.ExecInDeployment(
-		execCtx,
-		namespace,
-		simpleAppClientDeploymentName,
-		cmd,
-		&stdout,
-		&stderr,
-	)
-	return stdout.String(), err
-}
-
-// getServerPodIP returns the IP of the server pod in the test namespace.
-func getServerPodIP(ctx context.Context, t *testing.T) string {
-	t.Helper()
-	namespace := getNamespace(ctx)
-
-	var pods corev1.PodList
-	require.NoError(t, getSecurityV1Alpha1Client(ctx).WithNamespace(namespace).List(ctx, &pods),
-		"failed to list pods in namespace %q", namespace)
-	for _, pod := range pods.Items {
-		if strings.HasPrefix(pod.Name, simpleAppServerDeploymentName+"-") && pod.Status.PodIP != "" {
-			return pod.Status.PodIP
-		}
-	}
-	t.Fatalf("no running server pod found in namespace %q", namespace)
-	return ""
 }
 
 // assertViolationWithAction polls the policy status until a violation with the
