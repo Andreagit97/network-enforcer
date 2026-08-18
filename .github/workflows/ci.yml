@@ -73,6 +73,20 @@ jobs:
             git --no-pager diff
             exit 1
           fi
+  helm-unit-test:
+    name: Helm unit test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.19.0
+      - name: Install Helm-unittest
+        # Pin version to 1.0.2 due to https://github.com/helm-unittest/helm-unittest/issues/790
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest --version 1.0.2
+      - run: make helm-unit-test
   commitlint:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'

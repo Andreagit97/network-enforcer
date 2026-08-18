@@ -31,11 +31,9 @@ spec:
       containers:
       - args:
         {{- toYaml .Values.controller.args | nindent 8 }}
-        - --drain-flows-interval={{ .Values.controller.drainFlowsInterval }}
-        - --wnp-status-reconciler-cniwatcher-grpc-port={{ .Values.cniwatcher.grpcPort }}
+        - --provider-name={{ .Values.controller.provider.name }}
+        - --provider-endpoint={{ include "network-enforcer.controller.providerEndpoint" . }}
         - --wnp-status-reconciler-update-interval={{ .Values.controller.wnpStatusUpdateInterval }}
-        - --wnp-status-reconciler-cniwatcher-label-selector={{ include "network-enforcer.cniwatcher.selectorLabelsString" . }}
-        - --wnp-status-reconciler-cniwatcher-grpc-mtls-cert-dir={{ include "network-enforcer.cniwatcher.certDir" . }}
         command:
         - /controller
         env:
@@ -49,10 +47,12 @@ spec:
           | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
         name: manager
+        {{- if eq .Values.controller.provider.name "istio" }}
         ports:
-        - containerPort: 4317
+        - containerPort: {{ include "network-enforcer.controller.istioPort" . }}
           name: otlp-grpc
           protocol: TCP
+        {{- end }}
         livenessProbe:
           httpGet:
             path: /healthz
@@ -69,30 +69,8 @@ spec:
         securityContext: {{- toYaml .Values.controller.containerSecurityContext
           | nindent 10 }}
         volumeMounts:
-        - name: webhook-certs
-          mountPath: /tmp/k8s-webhook-server/serving-certs
-          readOnly: true
-        - name: cniwatcher-mtls-certs
-          mountPath: {{ include "network-enforcer.cniwatcher.certDir" . }}
-          readOnly: true
         {{- include "network-enforcer.otel.config.volumeMounts" . | indent 8 }}
       volumes:
-      - name: webhook-certs
-        csi:
-          driver: "csi.cert-manager.io"
-          readOnly: true
-          volumeAttributes:
-            csi.cert-manager.io/issuer-name: {{ include "network-enforcer.caIssuerName" . }}
-            csi.cert-manager.io/issuer-kind: Issuer
-            csi.cert-manager.io/dns-names: {{ include "network-enforcer.fullname" . }}-controller-webhook.{{ .Release.Namespace }}.svc
-      - name: cniwatcher-mtls-certs
-        csi:
-          driver: "csi.cert-manager.io"
-          readOnly: true
-          volumeAttributes:
-            csi.cert-manager.io/issuer-name: {{ include "network-enforcer.caIssuerName" . }}
-            csi.cert-manager.io/issuer-kind: Issuer
-            csi.cert-manager.io/dns-names: {{ include "network-enforcer.fullname" . }}-controller-manager.{{ .Release.Namespace }}.svc,{{ include "network-enforcer.fullname" . }}-otlp,{{ include "network-enforcer.controller.otlpServiceDNS" . }}
       {{- include "network-enforcer.otel.config.volumes" . | indent 6 }}
       securityContext: {{- toYaml .Values.controller.podSecurityContext | nindent
         8 }}

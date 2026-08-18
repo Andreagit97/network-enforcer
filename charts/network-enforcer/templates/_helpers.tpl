@@ -50,33 +50,51 @@ app.kubernetes.io/name: {{ include "network-enforcer.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
+
 {{/*
-cniwatcher selector labels
+Name of the controller OTLP service used to reach the istio scraper.
 */}}
-{{- define "network-enforcer.cniwatcher.selectorLabels" -}}
-app.kubernetes.io/component: cniwatcher
-{{ include "network-enforcer.selectorLabels" . }}
+{{- define "network-enforcer.controller.istioService" -}}
+{{ include "network-enforcer.fullname" . }}-istio-otlp
 {{- end -}}
 
 {{/*
-This is used by the controller to list cniwatcher pods.
+Resolved provider endpoint (configured or default by provider).
+Defaults:
+- istio: 4317
+- cilium: hubble-relay.kube-system.svc:80
+- calico: goldmane.calico-system.svc:7443
 */}}
-{{- define "network-enforcer.cniwatcher.selectorLabelsString" -}}
-  {{- $yaml := include "network-enforcer.cniwatcher.selectorLabels" . -}}
-  {{- $m := (fromYaml $yaml) | default dict -}}
-  {{- $keys := keys $m | sortAlpha -}}
-  {{- $out := list -}}
-  {{- range $k := $keys -}}
-    {{- $out = append $out (printf "%s=%v" $k (get $m $k)) -}}
-  {{- end -}}
-  {{- join "," $out -}}
+{{- define "network-enforcer.controller.providerEndpoint" -}}
+{{- $provider := default "istio" .Values.controller.provider.name -}}
+{{- $endpoint := .Values.controller.provider.endpoint -}}
+{{- if not (empty $endpoint) -}}
+{{- $endpoint -}}
+{{- else if eq $provider "istio" -}}
+4317
+{{- else if eq $provider "cilium" -}}
+hubble-relay.kube-system.svc:80
+{{- else if eq $provider "calico" -}}
+goldmane.calico-system.svc:7443
+{{- else -}}
+{{- fail (printf "unsupported controller.provider.name %q" $provider) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
-DNS name of the controller OTLP service; also a SAN on the controller cert.
+Validated Istio OTLP port.
+Accepts configured int/string or provider default from helper.
 */}}
-{{- define "network-enforcer.controller.otlpServiceDNS" -}}
-{{ include "network-enforcer.fullname" . }}-otlp.{{ .Release.Namespace }}.svc.cluster.local
+{{- define "network-enforcer.controller.istioPort" -}}
+{{- $raw := include "network-enforcer.controller.providerEndpoint" . | trim -}}
+{{- if not (regexMatch "^[0-9]{1,5}$" $raw) -}}
+{{- fail (printf "controller.provider.endpoint must be a numeric port when controller.provider.name=istio (got %q)" $raw) -}}
+{{- end -}}
+{{- $port := atoi $raw -}}
+{{- if or (lt $port 1) (gt $port 65535) -}}
+{{- fail (printf "controller.provider.endpoint must be in range 1-65535 when controller.provider.name=istio (got %d)" $port) -}}
+{{- end -}}
+{{- $port -}}
 {{- end -}}
 
 {{/*
@@ -88,14 +106,13 @@ keys, mounted via cert-manager CSI.
 {{- end -}}
 
 {{/*
-Path to the CA certificate (ca.crt) shared by the controller and cniwatcher
-pods through their cert-manager CSI mount (network-enforcer.cniwatcher.certDir).
-It is used to verify the shipped OTel collector's TLS certificate when
-collectorStrategy == default.
+CA certificate path used by the controller when sending OTLP logs to the
+shipped in-cluster collector.
 */}}
 {{- define "network-enforcer.otel.caCertPath" -}}
-{{ include "network-enforcer.cniwatcher.certDir" . }}/ca.crt
+/etc/network-enforcer/certs/ca.crt
 {{- end -}}
+
 
 {{/*
 Print the otel environment variable settings.
@@ -164,79 +181,11 @@ Print the otel volumes settings (only relevant for the external strategy).
 {{- end }}
 
 {{/*
-Certificate helpers for cniwatcher mTLS (CA issuer and secret share a name).
+Certificate helpers for mTLS (CA issuer and secret share a name).
 */}}
 {{- define "network-enforcer.caIssuerName" -}}
 {{ include "network-enforcer.fullname" . }}-ca
 {{- end -}}
 {{- define "network-enforcer.caSecretName" -}}
 {{ include "network-enforcer.fullname" . }}-ca
-{{- end -}}
-{{- define "network-enforcer.cniwatcher.certDir" -}}
-/etc/network-enforcer/certs
-{{- end -}}
-
-{{/*
-Certificate directory for OBI mTLS (shares the same CA as cniwatcher).
-*/}}
-{{- define "network-enforcer.obi.certDir" -}}
-/etc/network-enforcer/certs
-{{- end -}}
-
-{{/*
-CNI-specific volume mounts for cniwatcher
-*/}}
-{{- define "network-enforcer.cniwatcher.volumeMounts" -}}
-{{- if eq .Values.cniwatcher.cniType "cilium" }}
-- name: hubble-sock
-  mountPath: /var/run/cilium
-{{- else if eq .Values.cniwatcher.cniType "calico" }}
-- name: goldmane-key-pair-volume
-  mountPath: /etc/goldmane/certs
-  readOnly: true
-{{- else if eq .Values.cniwatcher.cniType "flannel" }}
-- name: flannel-ulog
-  mountPath: /var/log/ulog
-  readOnly: true
-{{- else if eq .Values.cniwatcher.cniType "aws-vpc" }}
-- name: aws-eni-logs
-  mountPath: /var/log/aws-routed-eni
-  readOnly: true
-{{- end }}
-- name: cniwatcher-mtls-certs
-  mountPath: {{ include "network-enforcer.cniwatcher.certDir" . }}
-  readOnly: true
-{{- end -}}
-
-{{/*
-CNI-specific volumes for cniwatcher
-*/}}
-{{- define "network-enforcer.cniwatcher.volumes" -}}
-{{- if eq .Values.cniwatcher.cniType "cilium" }}
-- name: hubble-sock
-  hostPath:
-    path: /var/run/cilium
-{{- else if eq .Values.cniwatcher.cniType "calico" }}
-- name: goldmane-key-pair-volume
-  secret:
-    secretName: cniwatcher-goldmane-key-pair
-{{- else if eq .Values.cniwatcher.cniType "flannel" }}
-- name: flannel-ulog
-  hostPath:
-    path: /var/log/ulog
-    type: Directory
-{{- else if eq .Values.cniwatcher.cniType "aws-vpc" }}
-- name: aws-eni-logs
-  hostPath:
-    path: /var/log/aws-routed-eni
-    type: Directory
-{{- end }}
-- name: cniwatcher-mtls-certs
-  csi:
-    driver: "csi.cert-manager.io"
-    readOnly: true
-    volumeAttributes:
-      csi.cert-manager.io/issuer-name: {{ include "network-enforcer.caIssuerName" . }}
-      csi.cert-manager.io/issuer-kind: Issuer
-      csi.cert-manager.io/dns-names: ${POD_NAME}.${POD_NAMESPACE}
 {{- end -}}

@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
+	"strconv"
 	"time"
 
 	otellog "go.opentelemetry.io/otel/log"
@@ -32,34 +32,39 @@ import (
 	"github.com/go-logr/logr"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	istiosecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/controller"
 	"github.com/rancher-sandbox/network-enforcer/internal/events"
-	"github.com/rancher-sandbox/network-enforcer/internal/grpcexporter"
-	"github.com/rancher-sandbox/network-enforcer/internal/receiver"
-	"github.com/rancher-sandbox/network-enforcer/internal/topology"
-	"github.com/rancher-sandbox/network-enforcer/internal/violationbuf"
+	"github.com/rancher-sandbox/network-enforcer/internal/istio"
+	"github.com/rancher-sandbox/network-enforcer/internal/scraper"
+	"github.com/rancher-sandbox/network-enforcer/internal/types"
+	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	// +kubebuilder:scaffold:imports
 )
 
 const (
-	defaultDrainFlowsInterval      = 30 * time.Second
 	defaultWnpStatusUpdateInterval = 30 * time.Second
 	// otlpLogShutdownTimeout bounds the final flush of buffered log records
 	// when the manager stops. The manager context is already cancelled at
 	// that point, so the shutdown runs against a fresh context.
 	otlpLogShutdownTimeout = 10 * time.Second
+)
+
+type provider string
+
+const (
+	providerIstio  provider = "istio"
+	providerCilium provider = "cilium"
+	providerCalico provider = "calico"
 )
 
 type otelConf struct {
@@ -77,30 +82,60 @@ type metricsConf struct {
 	CertKey  string
 }
 
-type webhookConf struct {
-	CertPath string
-	CertName string
-	CertKey  string
+type providerConfig struct {
+	name     string
+	endpoint string
 }
 
 type config struct {
 	metrics              metricsConf
-	webhook              webhookConf
 	enableLeaderElection bool
 	probeAddr            string
 	secureMetrics        bool
 	enableHTTP2          bool
-	otlpPort             int
+	provider             providerConfig
 	otel                 otelConf
-	drainFlowsInterval   time.Duration
 	tlsOpts              []func(*tls.Config)
 	wnpStatusSyncConfig  controller.WorkloadNetworkPolicyStatusSyncConfig
 }
 
-func newControllerManager(
-	webhookServer webhook.Server,
+func setupProviderScraper(
+	ctx context.Context,
+	logger *slog.Logger,
+	mgr manager.Manager,
 	conf *config,
-) (manager.Manager, error) {
+	learningEnqueueFunc func(types.LearningEvent) bool,
+	violationBuffer *violation.Buffer,
+	eventLogger otellog.Logger,
+) error {
+	providerName := provider(conf.provider.name)
+	logger.InfoContext(ctx, "Configuring scraper", "provider", providerName)
+	switch providerName {
+	case providerIstio:
+		otelPort, err := strconv.Atoi(conf.provider.endpoint)
+		if err != nil {
+			return fmt.Errorf("istio provider: invalid OTEL port %q: %w", conf.provider.endpoint, err)
+		}
+		istioScraper := scraper.NewIstioScraper(scraper.IstioScraperConfig{
+			ViolationBuffer:      violationBuffer,
+			EnqueueLearningEvent: learningEnqueueFunc,
+			ViolationOtelLogger:  eventLogger,
+			Logger:               logger.With("component", "istio-scraper"),
+			OtelPort:             otelPort,
+			Enricher:             istio.NewEnricher(mgr.GetClient()),
+		})
+		if err = mgr.Add(istioScraper); err != nil {
+			return fmt.Errorf("unable to add istio scraper to manager: %w", err)
+		}
+		return nil
+	case providerCilium, providerCalico:
+		fallthrough
+	default:
+		return fmt.Errorf("unsupported provider %q", conf.provider.name)
+	}
+}
+
+func newControllerManager(conf *config) (manager.Manager, error) {
 	metricsServerOptions := metricsserver.Options{
 		BindAddress:   conf.metrics.Addr,
 		SecureServing: conf.secureMetrics,
@@ -120,10 +155,10 @@ func newControllerManager(
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(securityv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(istiosecurityv1.AddToScheme(scheme))
 	controllerOptions := ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
-		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: conf.probeAddr,
 		LeaderElection:         conf.enableLeaderElection,
 		LeaderElectionID:       "6163c1ee.security.rancher.io",
@@ -133,39 +168,6 @@ func newControllerManager(
 		return nil, fmt.Errorf("unable to start manager: %w", err)
 	}
 	return mgr, nil
-}
-
-func parseWebhookOptions(logger *slog.Logger, config *config) (*certwatcher.CertWatcher, []func(*tls.Config)) {
-	var webhookCertWatcher *certwatcher.CertWatcher
-
-	// Initial webhook TLS options
-	webhookTLSOpts := config.tlsOpts
-
-	if len(config.webhook.CertPath) > 0 {
-		logger.Info("Initializing webhook certificate watcher using provided certificates",
-			"webhook-cert-path",
-			config.webhook.CertPath,
-			"webhook-cert-name",
-			config.webhook.CertName,
-			"webhook-cert-key",
-			config.webhook.CertKey)
-
-		var err error
-		webhookCertWatcher, err = certwatcher.New(
-			filepath.Join(config.webhook.CertPath, config.webhook.CertName),
-			filepath.Join(config.webhook.CertPath, config.webhook.CertKey),
-		)
-		if err != nil {
-			logger.Error("Failed to initialize webhook certificate watcher", "error", err)
-			os.Exit(1)
-		}
-
-		webhookTLSOpts = append(webhookTLSOpts, func(config *tls.Config) {
-			config.GetCertificate = webhookCertWatcher.GetCertificate
-		})
-	}
-
-	return webhookCertWatcher, webhookTLSOpts
 }
 
 // setupOtelLogExporter initialises the OTLP log exporter and registers
@@ -211,21 +213,15 @@ func run(logger *slog.Logger, conf *config) error {
 		})
 	}
 
-	webhookCertWatcher, webhookTLSOpts := parseWebhookOptions(logger, conf)
-	webhookServer := webhook.NewServer(webhook.Options{
-		TLSOpts: webhookTLSOpts,
-	})
-
-	mgr, err := newControllerManager(webhookServer, conf)
+	mgr, err := newControllerManager(conf)
 	if err != nil {
 		return fmt.Errorf("unable to create controller manager: %w", err)
 	}
 
-	if webhookCertWatcher != nil {
-		logger.InfoContext(ctx, "Adding webhook certificate watcher to manager")
-		if err = mgr.Add(webhookCertWatcher); err != nil {
-			return fmt.Errorf("unable to add webhook certificate watcher to manager: %w", err)
-		}
+	// Enriching the source workload of an Istio violation is by peer IP, so
+	// register the pod status.podIP index before the cache starts.
+	if err = controller.SetupPodIPIndexer(ctx, mgr); err != nil {
+		return fmt.Errorf("unable to set up pod IP indexer: %w", err)
 	}
 
 	var eventLogger otellog.Logger
@@ -243,32 +239,26 @@ func run(logger *slog.Logger, conf *config) error {
 		}
 	}
 
-	store := topology.NewStore()
-
-	// The OTLP receiver reuses the same pod cert dir as the ScrapeViolations client.
-	receiver := receiver.NewReceiver(store, conf.otlpPort, conf.wnpStatusSyncConfig.AgentPoolConf.CertDirPath, logger)
-	err = mgr.Add(receiver)
-	if err != nil {
-		return fmt.Errorf("unable to add OTLP receiver to manager: %w", err)
-	}
-
 	// Create the violation ring buffer shared
-	monitorViolationBuffer := violationbuf.NewBuffer()
+	violationBuffer := violation.NewBuffer()
 
-	scanner := controller.NewTopologyScanner(
-		mgr.GetClient(),
-		store,
-		logger,
-		conf.drainFlowsInterval,
-		monitorViolationBuffer,
-		eventLogger,
-	)
-	err = mgr.Add(scanner)
-	if err != nil {
-		return fmt.Errorf("unable to add topology scanner to manager: %w", err)
+	learningReconciler := controller.NewLearningReconciler(mgr.GetClient())
+	if err = learningReconciler.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create learning reconciler: %w", err)
 	}
 
-	if err = setupControllers(ctx, logger, mgr, conf, eventLogger, monitorViolationBuffer); err != nil {
+	if err = setupProviderScraper(ctx,
+		logger,
+		mgr,
+		conf,
+		learningReconciler.GetEnqueueFunc(),
+		violationBuffer,
+		eventLogger,
+	); err != nil {
+		return err
+	}
+
+	if err = setupControllers(ctx, logger, mgr, conf, eventLogger, violationBuffer); err != nil {
 		return err
 	}
 
@@ -289,7 +279,7 @@ func setupControllers(
 	mgr manager.Manager,
 	conf *config,
 	eventLogger otellog.Logger,
-	monitorViolationBuffer *violationbuf.Buffer,
+	violationBuffer *violation.Buffer,
 ) error {
 	if err := (&controller.WorkloadNetworkPolicyReconciler{
 		Client: mgr.GetClient(),
@@ -305,15 +295,8 @@ func setupControllers(
 		return fmt.Errorf("unable to setup WorkloadNetworkPolicyProposal controller: %w", err)
 	}
 
-	if err := builder.WebhookManagedBy(mgr, &securityv1alpha1.WorkloadNetworkPolicyProposal{}).
-		WithValidator(&controller.ProposalWebhook{}).
-		Complete(); err != nil {
-		return fmt.Errorf("unable to create WorkloadNetworkPolicyProposal webhook: %w", err)
-	}
-
-	conf.wnpStatusSyncConfig.AgentPoolConf.Logger = logger.With("component", "agent-pool")
 	conf.wnpStatusSyncConfig.EventLogger = eventLogger
-	conf.wnpStatusSyncConfig.MonitorViolationBuffer = monitorViolationBuffer
+	conf.wnpStatusSyncConfig.ViolationBuffer = violationBuffer
 	logger.InfoContext(ctx, "Setting up WorkloadNetworkPolicyStatusSync with",
 		"config", conf.wnpStatusSyncConfig)
 	wnpStatusSync, err := controller.NewWorkloadNetworkPolicyStatusSync(
@@ -351,15 +334,16 @@ func main() {
 		"The name of the metrics server certificate file.",
 	)
 	flag.StringVar(&conf.metrics.CertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
-	flag.StringVar(&conf.webhook.CertPath, "webhook-cert-path", "",
-		"The directory that contains the webhook certificate.")
-	flag.StringVar(&conf.webhook.CertName, "webhook-cert-name", "tls.crt",
-		"The name of the webhook certificate file.")
-	flag.StringVar(&conf.webhook.CertKey, "webhook-cert-key", "tls.key",
-		"The name of the webhook key file.")
 	flag.BoolVar(&conf.enableHTTP2, "enable-http2", false,
-		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	flag.IntVar(&conf.otlpPort, "otlp-port", 4317, "The port the OTLP gRPC receiver listens on.")
+		"If set, HTTP/2 will be enabled for the metrics server")
+	flag.StringVar(&conf.provider.name, "provider-name", "",
+		"Data-plane provider used by the controller. Valid values: istio, cilium, calico.")
+	flag.StringVar(
+		&conf.provider.endpoint,
+		"provider-endpoint",
+		"",
+		"Provider endpoint",
+	)
 	flag.StringVar(&conf.otel.Endpoint, "otlp-log-endpoint",
 		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
 		"OTLP endpoint for the violation-lifecycle log exporter "+
@@ -386,31 +370,14 @@ func main() {
 		os.Getenv("OTEL_EXPORTER_OTLP_CLIENT_KEY"),
 		"Path to the client TLS key for mTLS with the OTLP log collector. "+
 			"Defaults to the OTEL_EXPORTER_OTLP_CLIENT_KEY env var.")
-	flag.DurationVar(&conf.drainFlowsInterval, "drain-flows-interval",
-		defaultDrainFlowsInterval, "The interval at which flows are drained.")
 	flag.DurationVar(&conf.wnpStatusSyncConfig.UpdateInterval,
 		"wnp-status-reconciler-update-interval",
 		defaultWnpStatusUpdateInterval,
-		"The interval at which WorkloadNetworkPolicy status is synced with cniwatcher pods.")
-	flag.StringVar(
-		&conf.wnpStatusSyncConfig.AgentPoolConf.LabelSelectorString,
-		"wnp-status-reconciler-cniwatcher-label-selector",
-		grpcexporter.DefaultCniwatcherLabelSelectorString,
-		"Label selector to discover cniwatcher pods.",
-	)
-	flag.IntVar(&conf.wnpStatusSyncConfig.AgentPoolConf.Port, "wnp-status-reconciler-cniwatcher-grpc-port",
-		grpcexporter.DefaultAgentPort, "gRPC port of cniwatcher ScrapeViolations server.")
-	flag.StringVar(
-		&conf.wnpStatusSyncConfig.AgentPoolConf.CertDirPath,
-		"wnp-status-reconciler-cniwatcher-grpc-mtls-cert-dir",
-		grpcexporter.DefaultCertDirPath,
-		"Directory containing tls.crt, tls.key, and ca.crt for mTLS with cniwatcher pods "+
-			"and the OTLP receiver. When empty, connections are insecure.",
-	)
+		"The interval at which WorkloadNetworkPolicy status is synced.")
 	flag.Parse()
 
 	slogHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
-	slogger := slog.New(slogHandler).With("component", "agent")
+	slogger := slog.New(slogHandler).With("component", "controller")
 	slog.SetDefault(slogger)
 	ctrl.SetLogger(logr.FromSlogHandler(slogger.Handler()))
 

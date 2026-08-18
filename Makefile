@@ -54,7 +54,7 @@ build-$(1)-image:
 E2E_DEPS += build-$(1)-image
 endef
 
-TARGET=controller cniwatcher
+TARGET=controller
 $(foreach T,$(TARGET),$(eval $(call BUILD_template,$(T))))
 
 .PHONY: manifests
@@ -68,22 +68,10 @@ manifests: controller-gen ## Generate CRDs and RBAC.
 	# Inject Helm labels after the name line
 	sed -i '/^  name:/a\  labels:\n  {{- include "network-enforcer.labels" . | nindent 4 }}' \
 		charts/network-enforcer/templates/controller/role.yaml
-	"$(CONTROLLER_GEN)" rbac:roleName=cniwatcher-role paths="./internal/cniwatcher" \
-		output:rbac:artifacts:config=charts/network-enforcer/templates/cniwatcher
-	sed -i 's/cniwatcher-role/{{ include "network-enforcer.fullname" . }}-cniwatcher/' \
-		charts/network-enforcer/templates/cniwatcher/role.yaml
-	sed -i '/^  name:/a\  labels:\n  {{- include "network-enforcer.labels" . | nindent 4 }}' \
-		charts/network-enforcer/templates/cniwatcher/role.yaml
 
 .PHONY: generate
 generate: manifests controller-gen generate-chart-values ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."
-
-.PHONY: proto-agent
-proto-agent: $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC) ## Generate Go code from proto/agent/v1/agent.proto.
-	PATH=$(LOCALBIN):$(PATH) protoc --go_out=. --go_opt=paths=source_relative \
-		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
-		proto/agent/v1/agent.proto
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -114,10 +102,6 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 .PHONY: controller
 controller: fmt ## Build controller binary.
 	CGO_ENABLED=0 GOOS=linux go build -o bin/controller ./cmd/controller
-
-.PHONY: cniwatcher
-cniwatcher: fmt ## Build cniwatcher binary.
-	CGO_ENABLED=0 GOOS=linux go build -o bin/cniwatcher ./cmd/cniwatcher
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
@@ -160,8 +144,6 @@ $(LOCALBIN):
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
-PROTOC_GEN_GO ?= $(LOCALBIN)/protoc-gen-go
-PROTOC_GEN_GO_GRPC ?= $(LOCALBIN)/protoc-gen-go-grpc
 HELM_VALUES_SCHEMA_JSON ?= $(LOCALBIN)/helm-values-schema-json
 
 ## Tool Versions
@@ -198,16 +180,6 @@ setup-envtest: envtest ## Download the binaries required for ENVTEST in the loca
 envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
-
-.PHONY: protoc-gen-go
-protoc-gen-go: $(PROTOC_GEN_GO)
-$(PROTOC_GEN_GO): | $(LOCALBIN)
-	$(call go-install-tool,$(PROTOC_GEN_GO),google.golang.org/protobuf/cmd/protoc-gen-go,$(PROTOC_GEN_GO_VERSION))
-
-.PHONY: protoc-gen-go-grpc
-protoc-gen-go-grpc: $(PROTOC_GEN_GO_GRPC)
-$(PROTOC_GEN_GO_GRPC): | $(LOCALBIN)
-	$(call go-install-tool,$(PROTOC_GEN_GO_GRPC),google.golang.org/grpc/cmd/protoc-gen-go-grpc,$(PROTOC_GEN_GO_GRPC_VERSION))
 
 .PHONY: helm-values-schema-json
 helm-values-schema-json: $(HELM_VALUES_SCHEMA_JSON) ## Download helm-values-schema-json locally if necessary.
@@ -250,43 +222,25 @@ define gomodver
 $(shell go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' $(1) 2>/dev/null)
 endef
 
-##@ cniWatcher
-
-GOLDMANE_VERSION ?= v3.30.2
-.PHONY: download-calico-goldmane-proto
-download-calico-goldmane-proto: ## Download Calico Goldmane proto file.
-	@echo "Downloading Goldmane proto file..."
-	mkdir -p internal/cniwatcher/calico/goldmane
-	curl -fsSL https://raw.githubusercontent.com/projectcalico/calico/$(GOLDMANE_VERSION)/goldmane/proto/api.proto -o internal/cniwatcher/calico/goldmane/api.proto
-
-.PHONY: generate-calico-goldmane-proto
-generate-calico-goldmane-proto: download-calico-goldmane-proto ## Generate Go code from Goldmane proto definitions.
-	@echo "Generating Go code from Goldmane proto definitions..."
-	protoc --go_out=. --go_opt=paths=source_relative \
-		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
-		internal/cniwatcher/calico/goldmane/api.proto
-
-
-# Use `E2E_CNI` env variable to change CNI
-# Example: `make test-e2e E2E_CNI=cilium`
-# If E2E_CNI is not specified the default is `cilium`
+# The e2e suite installs the selected data-plane provider (default: istio) and
+# the network-enforcer chart on a dedicated kind cluster.
+#
+# Use `E2E_PROVIDER` env variable to select the provider (currently only `istio`).
+# Example: `make test-e2e E2E_PROVIDER=istio`
 #
 # Set E2E_USE_EXISTING_CLUSTER=true to reuse an existing cluster.
-# Set E2E_DEPENDENCIES=none to skip CNI and cert-manager installation (useful with existing clusters).
-# Example: `make test-e2e E2E_USE_EXISTING_CLUSTER=true E2E_DEPENDENCIES=cert-manager`
+# Set E2E_DEPENDENCIES=none to skip the provider/cert-manager installation (useful with existing clusters).
+# Example: `make test-e2e E2E_USE_EXISTING_CLUSTER=true E2E_DEPENDENCIES=none`
 # Set E2E_NO_REBUILD=true to skip image building.  This is useful when you're developing new e2e tests.
 .PHONY: test-e2e
 test-e2e:
 ifneq ($(E2E_USE_EXISTING_CLUSTER),true)
 ifeq ($(E2E_NO_REBUILD),)
-	$(MAKE) build-controller-image build-cniwatcher-image
+	$(MAKE) build-controller-image
 endif
 endif
-	@echo "🧪 Building chart dependencies..."
-	helm repo add --force-update open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
-	helm dependency build charts/network-enforcer
-	@echo "🧪 Running e2e tests with '$(E2E_CNI)' CNI..."
-	E2E_USE_EXISTING_CLUSTER=$(E2E_USE_EXISTING_CLUSTER) E2E_DEPENDENCIES=$(E2E_DEPENDENCIES) go test -v ./test/e2e/... -count=1
+	@echo "🧪 Running e2e tests with '$(E2E_PROVIDER)' provider..."
+	E2E_PROVIDER=$(E2E_PROVIDER) E2E_USE_EXISTING_CLUSTER=$(E2E_USE_EXISTING_CLUSTER) E2E_DEPENDENCIES=$(E2E_DEPENDENCIES) go test -v ./test/e2e/... -count=1
 
 # Create kind cluster and install selected CNI with dependencies.
 # Example: `make setup-dev-cluster E2E_CNI=cilium`
@@ -301,3 +255,7 @@ setup-dev-cluster:
 delete-dev-cluster:
 	@echo "🛠️ Delete dev cluster..."
 	kind delete cluster
+
+.PHONY: helm-unit-test
+helm-unit-test:
+	helm unittest charts/network-enforcer/ --file "tests/**/*_test.yaml"

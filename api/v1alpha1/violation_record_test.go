@@ -15,25 +15,25 @@ import (
 
 func mkViolation() ViolationRecord {
 	return ViolationRecord{
-		ID:        0,
-		Timestamp: metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
-		NodeName:  "node-1",
-		Direction: networkingv1.PolicyTypeEgress,
-		Source: WorkloadRef{
-			Namespace: "ns1",
-			OwnerKind: "Deployment",
-			OwnerName: "app",
+		ID: 0,
+		ViolationInfo: ViolationInfo{
+			Timestamp: metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+			Source: WorkloadRef{
+				Namespace: "ns1",
+				OwnerKind: "Deployment",
+				OwnerName: "app",
+			},
+			Dest: WorkloadRef{
+				Namespace: "ns2",
+				OwnerKind: "Service",
+				OwnerName: "svc",
+			},
+			Protocol:               corev1.ProtocolTCP,
+			DstPort:                80,
+			Action:                 "protect",
+			DenyingPolicyNamespace: "ns1",
+			DenyingPolicyName:      "deny-all",
 		},
-		Dest: WorkloadRef{
-			Namespace: "ns2",
-			OwnerKind: "Service",
-			OwnerName: "svc",
-		},
-		Protocol:               corev1.ProtocolTCP,
-		DstPort:                80,
-		Action:                 "protect",
-		DenyingPolicyNamespace: "ns1",
-		DenyingPolicyName:      "deny-all",
 	}
 }
 
@@ -46,12 +46,6 @@ func (r ViolationRecord) withID(id int64) ViolationRecord {
 // withTimestamp returns a copy with a different timestamp.
 func (r ViolationRecord) withTimestamp(ts time.Time) ViolationRecord {
 	r.Timestamp = metav1.NewTime(ts)
-	return r
-}
-
-// withIngress returns a copy with direction set to ingress.
-func (r ViolationRecord) withIngress() ViolationRecord {
-	r.Direction = networkingv1.PolicyTypeIngress
 	return r
 }
 
@@ -70,6 +64,12 @@ func (r ViolationRecord) withDest(ns, name string) ViolationRecord {
 // withSource returns a copy with a different source name.
 func (r ViolationRecord) withSource(ns, name string) ViolationRecord {
 	r.Source = WorkloadRef{Namespace: ns, OwnerKind: "Deployment", OwnerName: name}
+	return r
+}
+
+// withSourceIdentity returns a copy with a different source identity.
+func (r ViolationRecord) withSourceIdentity(identity string) ViolationRecord {
+	r.Source.Identity = identity
 	return r
 }
 
@@ -92,12 +92,6 @@ func (r ViolationRecord) withDenyingPolicy(ns, name string) ViolationRecord {
 	return r
 }
 
-// withNodeName returns a copy with a different node name.
-func (r ViolationRecord) withNodeName(name string) ViolationRecord {
-	r.NodeName = name
-	return r
-}
-
 func TestViolationRecordKey(t *testing.T) {
 	base := mkViolation()
 
@@ -105,11 +99,12 @@ func TestViolationRecordKey(t *testing.T) {
 	require.Equal(t, base.Key(), base.withTimestamp(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)).Key(),
 		"timestamp must not change the key")
 
-	// Different direction → different keys.
-	require.NotEqual(t, base.Key(), base.withIngress().Key())
-
 	// Different source → different keys.
 	require.NotEqual(t, base.Key(), base.withSource("other-ns", "other-app").Key())
+
+	// Different source identity → different keys (distinct principals are
+	// distinct violations even in the same namespace).
+	require.NotEqual(t, base.Key(), base.withSourceIdentity("spiffe://cluster.local/ns/ns1/sa/other-sa").Key())
 
 	// Different dest → different keys.
 	require.NotEqual(t, base.Key(), base.withDest("other-ns", "other-svc").Key())
@@ -125,10 +120,6 @@ func TestViolationRecordKey(t *testing.T) {
 
 	// Different denying policy → different keys.
 	require.NotEqual(t, base.Key(), base.withDenyingPolicy("ns1", "other-policy").Key())
-
-	// Different node name → same key (node is not part of dedup).
-	require.Equal(t, base.Key(), base.withNodeName("node-2").Key(),
-		"node must not be part of the dedup key")
 }
 
 func TestMergeScrapedViolations(t *testing.T) {
@@ -290,9 +281,9 @@ func TestClearAllowedViolations(t *testing.T) {
 		{
 			name: "ingress_with_namespace_match",
 			violations: []ViolationRecord{
-				base.withIngress(),
+				base,
 				func() ViolationRecord {
-					r := base.withIngress()
+					r := base
 					r.Source = WorkloadRef{Namespace: "ns3", OwnerKind: "Deployment", OwnerName: "other"}
 					return r
 				}(),
@@ -314,7 +305,7 @@ func TestClearAllowedViolations(t *testing.T) {
 				},
 			},
 			expected: []ViolationRecord{
-				base.withIngress().withSource("ns3", "other"),
+				base.withSource("ns3", "other"),
 			},
 		},
 		{
@@ -430,7 +421,10 @@ func TestClearAllowedViolations(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			wnp := &WorkloadNetworkPolicy{
 				Spec: WorkloadNetworkPolicySpec{
-					PolicyTemplate: tt.template,
+					PolicyBackendSpec: PolicyBackendSpec{
+						Backend:    PolicyBackendKubernetes,
+						Kubernetes: &tt.template,
+					},
 				},
 				Status: WorkloadNetworkPolicyStatus{
 					Violations: tt.violations,
@@ -442,30 +436,184 @@ func TestClearAllowedViolations(t *testing.T) {
 	}
 }
 
+func TestClearAllowedIstioViolations(t *testing.T) {
+	base := mkViolation()
+
+	istioWNP := func(rules []IstioAuthorizationPolicyRule) *WorkloadNetworkPolicy {
+		return &WorkloadNetworkPolicy{
+			Spec: WorkloadNetworkPolicySpec{
+				PolicyBackendSpec: PolicyBackendSpec{
+					Backend: PolicyBackendIstio,
+					Istio: &IstioAuthorizationPolicySpec{
+						Selector: metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "server"},
+						},
+						Rules: rules,
+					},
+				},
+			},
+		}
+	}
+
+	srcPolicy := func(principals ...string) IstioAuthorizationPolicyRule {
+		return IstioAuthorizationPolicyRule{
+			From: []IstioFrom{
+				{Source: IstioSource{Principals: principals}},
+			},
+			To: []IstioTo{
+				{Operation: IstioOperation{Ports: []string{"80"}}},
+			},
+		}
+	}
+
+	// appIdentity is the SPIFFE identity of the violation source in ns1.
+	appIdentity := "spiffe://cluster.local/ns/ns1/sa/app-sa"
+	appViolation := base.withSourceIdentity(appIdentity)
+
+	tests := []struct {
+		name      string
+		rules     []IstioAuthorizationPolicyRule
+		violation ViolationRecord
+		expected  []ViolationRecord
+	}{
+		{
+			name:      "matching_source_identity_clears",
+			rules:     []IstioAuthorizationPolicyRule{srcPolicy(appIdentity)},
+			violation: appViolation,
+			expected:  nil,
+		},
+		{
+			// Kyle's case: a rule allowing app-sa must not clear a violation
+			// from other-sa in the same namespace, Istio would still deny it.
+			name:      "same_namespace_different_principal_keeps",
+			rules:     []IstioAuthorizationPolicyRule{srcPolicy(appIdentity)},
+			violation: base.withSourceIdentity("spiffe://cluster.local/ns/ns1/sa/other-sa"),
+			expected: []ViolationRecord{
+				base.withSourceIdentity("spiffe://cluster.local/ns/ns1/sa/other-sa"),
+			},
+		},
+		{
+			// Without the source identity we cannot prove the rule allows the
+			// source, so the violation is kept (fail-safe).
+			name:      "unknown_source_identity_keeps_on_principal_rule",
+			rules:     []IstioAuthorizationPolicyRule{srcPolicy(appIdentity)},
+			violation: base,
+			expected:  []ViolationRecord{base},
+		},
+		{
+			// The canonical principal form carries no `spiffe://` scheme: the
+			// backend strips it at ingestion, so both sides match exactly.
+			name:      "canonical_prefix_free_identity_clears",
+			rules:     []IstioAuthorizationPolicyRule{srcPolicy("cluster.local/ns/ns1/sa/app-sa")},
+			violation: base.withSourceIdentity("cluster.local/ns/ns1/sa/app-sa"),
+			expected:  nil,
+		},
+		{
+			// A rule written with the `spiffe://` scheme cannot match the
+			// canonical prefix-free identity: principals must follow the Istio
+			// form. Keeps the violation (fail-safe).
+			name:      "prefixed_rule_principal_keeps",
+			rules:     []IstioAuthorizationPolicyRule{srcPolicy("spiffe://cluster.local/ns/ns1/sa/app-sa")},
+			violation: base.withSourceIdentity("cluster.local/ns/ns1/sa/app-sa"),
+			expected:  []ViolationRecord{base.withSourceIdentity("cluster.local/ns/ns1/sa/app-sa")},
+		},
+		{
+			name:      "other_source_identity_keeps",
+			rules:     []IstioAuthorizationPolicyRule{srcPolicy("spiffe://cluster.local/ns/other/sa/app-sa")},
+			violation: appViolation,
+			expected:  []ViolationRecord{appViolation},
+		},
+		{
+			name:      "other_port_keeps",
+			rules:     []IstioAuthorizationPolicyRule{srcPolicy(appIdentity).withPorts("8080")},
+			violation: appViolation,
+			expected:  []ViolationRecord{appViolation},
+		},
+		{
+			name:      "port_range_match_clears",
+			rules:     []IstioAuthorizationPolicyRule{srcPolicy(appIdentity).withPorts("80-90")},
+			violation: appViolation,
+			expected:  nil,
+		},
+		{
+			name: "wildcard_principal_clears",
+			rules: []IstioAuthorizationPolicyRule{
+				{
+					From: []IstioFrom{{Source: IstioSource{Principals: []string{"*"}}}},
+					To:   []IstioTo{{Operation: IstioOperation{Ports: []string{"80"}}}},
+				},
+			},
+			violation: base,
+			expected:  nil,
+		},
+		{
+			name: "empty_from_matches_any_source",
+			rules: []IstioAuthorizationPolicyRule{
+				{To: []IstioTo{{Operation: IstioOperation{Ports: []string{"80"}}}}},
+			},
+			violation: base,
+			expected:  nil,
+		},
+		{
+			name: "empty_to_matches_any_port",
+			rules: []IstioAuthorizationPolicyRule{{From: []IstioFrom{{Source: IstioSource{Principals: []string{
+				appIdentity,
+			}}}}}},
+			violation: appViolation,
+			expected:  nil,
+		},
+		{
+			name:      "nil_istio_spec_leaves_untouched",
+			rules:     nil,
+			violation: base,
+			expected:  []ViolationRecord{base},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wnp := istioWNP(tt.rules)
+			wnp.Status.Violations = []ViolationRecord{tt.violation}
+			wnp.clearAllowedViolations()
+			if tt.expected == nil {
+				require.Empty(t, wnp.Status.Violations)
+				return
+			}
+			require.Equal(t, tt.expected, wnp.Status.Violations)
+		})
+	}
+}
+
+// withPorts returns a copy of the rule with the given destination ports.
+func (r IstioAuthorizationPolicyRule) withPorts(ports ...string) IstioAuthorizationPolicyRule {
+	r.To = []IstioTo{{Operation: IstioOperation{Ports: ports}}}
+	return r
+}
+
 func TestAcknowledgeViolationsFromAnnotations(t *testing.T) {
 	now := metav1.NewTime(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC))
 
 	newViolation := func(id int64) ViolationRecord {
 		return ViolationRecord{
-			ID:        id,
-			Timestamp: metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
-			NodeName:  "node-1",
-			Direction: networkingv1.PolicyTypeEgress,
-			Source: WorkloadRef{
-				Namespace: "ns1",
-				OwnerKind: "Deployment",
-				OwnerName: "app",
+			ID: id,
+			ViolationInfo: ViolationInfo{
+				Timestamp: metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+				Source: WorkloadRef{
+					Namespace: "ns1",
+					OwnerKind: "Deployment",
+					OwnerName: "app",
+				},
+				Dest: WorkloadRef{
+					Namespace: "ns2",
+					OwnerKind: "Service",
+					OwnerName: fmt.Sprintf("svc-%d", id),
+				},
+				Protocol:               corev1.ProtocolTCP,
+				DstPort:                80,
+				Action:                 "protect",
+				DenyingPolicyNamespace: "ns1",
+				DenyingPolicyName:      "deny-all",
 			},
-			Dest: WorkloadRef{
-				Namespace: "ns2",
-				OwnerKind: "Service",
-				OwnerName: fmt.Sprintf("svc-%d", id),
-			},
-			Protocol:               corev1.ProtocolTCP,
-			DstPort:                80,
-			Action:                 "protect",
-			DenyingPolicyNamespace: "ns1",
-			DenyingPolicyName:      "deny-all",
 		}
 	}
 
@@ -644,22 +792,25 @@ func TestRecomputeStatus(t *testing.T) {
 
 		wnp := &WorkloadNetworkPolicy{
 			Spec: WorkloadNetworkPolicySpec{
-				PolicyTemplate: networkingv1.NetworkPolicySpec{
-					Egress: []networkingv1.NetworkPolicyEgressRule{
-						{
-							To: []networkingv1.NetworkPolicyPeer{
-								{
-									NamespaceSelector: &metav1.LabelSelector{
-										MatchLabels: map[string]string{
-											corev1.LabelMetadataName: "ns2",
+				PolicyBackendSpec: PolicyBackendSpec{
+					Backend: PolicyBackendKubernetes,
+					Kubernetes: &networkingv1.NetworkPolicySpec{
+						Egress: []networkingv1.NetworkPolicyEgressRule{
+							{
+								To: []networkingv1.NetworkPolicyPeer{
+									{
+										NamespaceSelector: &metav1.LabelSelector{
+											MatchLabels: map[string]string{
+												corev1.LabelMetadataName: "ns2",
+											},
 										},
 									},
 								},
-							},
-							Ports: []networkingv1.NetworkPolicyPort{
-								{
-									Protocol: &([]corev1.Protocol{corev1.ProtocolTCP}[0]),
-									Port:     &([]intstr.IntOrString{intstr.FromInt32(80)}[0]),
+								Ports: []networkingv1.NetworkPolicyPort{
+									{
+										Protocol: &([]corev1.Protocol{corev1.ProtocolTCP}[0]),
+										Port:     &([]intstr.IntOrString{intstr.FromInt32(80)}[0]),
+									},
 								},
 							},
 						},

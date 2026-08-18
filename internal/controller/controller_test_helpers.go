@@ -29,9 +29,12 @@ func newTestWNP(name, namespace string) *securityv1alpha1.WorkloadNetworkPolicy 
 		},
 		Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
 			Mode: securityv1alpha1.WorkloadNetworkPolicyModeProtect,
-			PolicyTemplate: networkingv1.NetworkPolicySpec{
-				PodSelector: metav1.LabelSelector{
-					MatchLabels: map[string]string{testLabelKey: "test"},
+			PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+				Backend: securityv1alpha1.PolicyBackendKubernetes,
+				Kubernetes: &networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{testLabelKey: "test"},
+					},
 				},
 			},
 		},
@@ -48,7 +51,7 @@ func newOwnedNetworkPolicy(wnp *securityv1alpha1.WorkloadNetworkPolicy) *network
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion:         securityv1alpha1.GroupVersion.String(),
-					Kind:               "WorkloadNetworkPolicy",
+					Kind:               securityv1alpha1.WorkloadNetworkPolicyKind,
 					Name:               wnp.Name,
 					UID:                wnp.UID,
 					Controller:         &controller,
@@ -56,6 +59,6 @@ func newOwnedNetworkPolicy(wnp *securityv1alpha1.WorkloadNetworkPolicy) *network
 				},
 			},
 		},
-		Spec: wnp.Spec.PolicyTemplate,
+		Spec: *wnp.Spec.Kubernetes,
 	}
 }

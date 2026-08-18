@@ -91,11 +91,3 @@ targets:
     spec:
       file: charts/network-enforcer/values.yaml
       key: $.controller.image.tag
-  update_cniwatcher_version:
-    scmid: default
-    name: update Helm chart cniwatcher version
-    kind: yaml
-    sourceid: releaseVersion
-    spec:
-      file: charts/network-enforcer/values.yaml
-      key: $.cniwatcher.image.tag

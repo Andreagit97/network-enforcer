@@ -1,5 +1,7 @@
 = Network-Enforcer Quick Start
 
+todo!: fix the quickstart, remove no more used components like cniwatcher.
+
 Welcome to the Network-Enforcer Quick Start.
 
 This guide will walk you through the following steps:

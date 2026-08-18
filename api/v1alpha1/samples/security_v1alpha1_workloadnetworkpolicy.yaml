@@ -4,14 +4,17 @@ metadata:
   name: networkpolicy-sample
 spec:
   mode: protect
-  policyTemplate:
-    podSelector: {}
+  backend: kubernetes
+  kubernetes:
+    podSelector:
+      matchLabels:
+        app: nginx
     policyTypes:
       - Ingress
       - Egress
     ingress:
-    - from:
-      - podSelector: {}
+      - from:
+          - podSelector: {}
     egress:
-    - to:
-      - podSelector: {}
+      - to:
+          - podSelector: {}

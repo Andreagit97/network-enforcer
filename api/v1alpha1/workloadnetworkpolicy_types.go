@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -42,21 +41,19 @@ const (
 
 // WorkloadNetworkPolicySpec defines the desired state of a WorkloadNetworkPolicy.
 type WorkloadNetworkPolicySpec struct {
+	PolicyBackendSpec `json:",inline"`
+
 	// Mode controls whether the policy is observed (monitor) or actively
 	// enforced (protect). Defaults to monitor.
 	// +kubebuilder:default=monitor
 	// +optional
 	Mode WorkloadNetworkPolicyMode `json:"mode,omitempty"`
-
-	// PolicyTemplate is the embedded networking.k8s.io NetworkPolicySpec that
-	// this resource represents at runtime. The semantics of the policy are
-	// selected by Mode; the spec itself is identical to a NetworkPolicySpec.
-	// +required
-	PolicyTemplate networkingv1.NetworkPolicySpec `json:"policyTemplate"`
 }
 
 // WorkloadRef identifies a Kubernetes workload by its namespace, owner kind,
-// and owner name.
+// and owner name. Identity is the provider-specific workload identity (SPIFFE
+// for Istio, numeric security ID for Cilium, empty for Calico); it is needed
+// for exact attribution, e.g. matching Istio principals in a policy rule.
 type WorkloadRef struct {
 	// Namespace is the Kubernetes namespace of the workload.
 	// +optional
@@ -68,26 +65,20 @@ type WorkloadRef struct {
 	// OwnerName is the name of the owner resource.
 	// +optional
 	OwnerName string `json:"ownerName,omitempty"`
+	// Identity is the provider-specific workload identity: SPIFFE for Istio,
+	// numeric security ID for Cilium, empty for Calico.
+	// +optional
+	Identity string `json:"identity,omitempty"`
 }
 
-// ViolationRecord holds the details of a single network policy violation.
-type ViolationRecord struct {
-	// ID is a per-policy unique identifier allocated by the controller
-	// when the record is first observed. It is stable across re-scrapes
-	// of the same logical violation, so consumers can refer to a single
-	// record by ID (for example when correlating with external events).
-	//
-	// Stored as int64 (not uint64) for compatibility with the Kubernetes
-	// field-management machinery used by controller-runtime's test
-	// fixtures; the counter is monotonically increasing and never goes
-	// negative, so the sign bit is never set in practice.
-	ID int64 `json:"id"`
+// ViolationInfo holds the details of a single network policy violation without
+// the controller-assigned ID. Backend scrapers produce observations in this
+// shape (see violation.Observation); the controller assigns the ID
+// when it persists the record into wnp.Status.Violations.
+// +kubebuilder:object:generate=true
+type ViolationInfo struct {
 	// Timestamp is when the violation last occurred.
 	Timestamp metav1.Time `json:"timestamp"`
-	// NodeName is the node whose cniwatcher reported the violation.
-	NodeName string `json:"nodeName"`
-	// Direction is the traffic direction.
-	Direction networkingv1.PolicyType `json:"direction"`
 	// Source is the workload that initiated the traffic.
 	// +optional
 	Source WorkloadRef `json:"source,omitempty"`
@@ -103,13 +94,39 @@ type ViolationRecord struct {
 	DstPort int32 `json:"dstPort,omitempty"`
 	// Action is the enforcement action taken (monitor or protect).
 	Action WorkloadNetworkPolicyMode `json:"action"`
-	// DenyingPolicyNamespace is the namespace of the NetworkPolicy that denied
-	// the flow.
+	// DenyingPolicyNamespace is the namespace of the WorkloadNetworkPolicy this
+	// violation belongs to. For a DENY it is the policy that denied the flow; for
+	// an ALLOW-miss (which carries no denying policy on the wire) the scraper
+	// resolves the owning WorkloadNetworkPolicy by matching the destination pod's
+	// labels against WNP selectors and records it here (see istio.Enricher).
 	// +optional
 	DenyingPolicyNamespace string `json:"denyingPolicyNamespace,omitempty"`
-	// DenyingPolicyName is the name of the NetworkPolicy that denied the flow.
+	// DenyingPolicyName is the name of the WorkloadNetworkPolicy this violation
+	// belongs to. For a DENY it is the policy that denied the flow; for an
+	// ALLOW-miss it is the owning WorkloadNetworkPolicy resolved by selector match
+	// (see DenyingPolicyNamespace). The controller keys the violation to its WNP
+	// by this name for both cases; Action (monitor vs protect) distinguishes them.
 	// +optional
 	DenyingPolicyName string `json:"denyingPolicyName,omitempty"`
+}
+
+// ViolationRecord holds the details of a single network policy violation.
+// It embeds ViolationInfo (the violation without the ID) so that the two
+// types cannot drift apart: every violation field is defined once, in
+// ViolationInfo.
+type ViolationRecord struct {
+	ViolationInfo `json:",inline"`
+
+	// ID is a per-policy unique identifier allocated by the controller
+	// when the record is first observed. It is stable across re-scrapes
+	// of the same logical violation, so consumers can refer to a single
+	// record by ID (for example when correlating with external events).
+	//
+	// Stored as int64 (not uint64) for compatibility with the Kubernetes
+	// field-management machinery used by controller-runtime's test
+	// fixtures; the counter is monotonically increasing and never goes
+	// negative, so the sign bit is never set in practice.
+	ID int64 `json:"id"`
 }
 
 // AcknowledgedViolationRecord wraps a ViolationRecord together with the
@@ -166,8 +183,8 @@ type WorkloadNetworkPolicyStatus struct {
 const MaxViolationRecords = 100
 
 // WorkloadNetworkPolicy is the schema for the runtime network policy API.
-// It wraps a standard networkingv1.NetworkPolicySpec and selects a mode
-// (monitor or protect). The resource is intentionally namespaced and uses
+// Spec carries a backend-specific policy payload (Kubernetes or Istio) and a
+// mode (monitor or protect). The resource is intentionally namespaced and uses
 // the `security.rancher.io` group to avoid colliding with the upstream
 // `networking.k8s.io/NetworkPolicy` kind.
 //

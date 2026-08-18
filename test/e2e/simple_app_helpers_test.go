@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -24,9 +26,15 @@ const (
 	simpleAppManifest             = "simple_app.yaml"
 	simpleAppClientDeploymentName = "http-client"
 	simpleAppServerDeploymentName = "http-server"
+	simpleAppClientServiceAccount = "http-client-sa"
 	simpleAppTCPServicePort       = int32(18080)
 	simpleAppUDPServicePort       = int32(18083)
 	simpleAppUDPServerPort        = int32(18081)
+	// simpleAppViolatingServicePort is a service port the server echoes on but
+	// that is NOT part of any learned policy: traffic to it is a violation
+	// (observed in monitor mode, blocked in protect mode) while still echoing
+	// the payload so tests can rely on the round-trip.
+	simpleAppViolatingServicePort = int32(18082)
 )
 
 func teardownSimpleAppWorkload(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
@@ -94,7 +102,7 @@ func setupSimpleAppWorkload(ctx context.Context, t *testing.T, _ *envconf.Config
 	return ctx
 }
 
-func getProtoCmd(proto corev1.Protocol) (string, []string) {
+func getProtoCmd(proto corev1.Protocol, port int32) (string, []string) {
 	const (
 		tcpPayload           = "tcp-e2e-payload"
 		udpPayload           = "udp-e2e-payload"
@@ -110,10 +118,13 @@ func getProtoCmd(proto corev1.Protocol) (string, []string) {
 				"printf %s | nc -w 2 %s %d",
 				strconv.Quote(tcpPayload),
 				simpleAppServiceName,
-				simpleAppTCPServicePort,
+				port,
 			),
 		}
 	case corev1.ProtocolUDP:
+		// UDP is out of scope for the Istio ambient path (traffic does not
+		// pass through ztunnel), but it will be needed for the calico and
+		// cilium providers.
 		return udpPayload, []string{
 			"sh",
 			"-c",
@@ -121,7 +132,7 @@ func getProtoCmd(proto corev1.Protocol) (string, []string) {
 				"printf %s | nc -u -w 2 %s %d",
 				strconv.Quote(udpPayload),
 				simpleAppServiceName,
-				simpleAppUDPServicePort,
+				port,
 			),
 		}
 	case corev1.ProtocolSCTP:
@@ -131,13 +142,13 @@ func getProtoCmd(proto corev1.Protocol) (string, []string) {
 	}
 }
 
-func execInSimpleClientDeployment(
+// execInSimpleClientDeploymentRaw executes a command in the client deployment's
+// first pod without asserting on the error, so callers can distinguish allowed
+// (no error, echoed payload) from blocked (rejected connection) traffic.
+func execInSimpleClientDeploymentRaw(
 	ctx context.Context,
-	t *testing.T,
 	command []string,
-) (string, string) {
-	t.Helper()
-
+) (string, string, error) {
 	namespace := getNamespace(ctx)
 	r := getSecurityV1Alpha1Client(ctx)
 	var stdout bytes.Buffer
@@ -154,21 +165,49 @@ func execInSimpleClientDeployment(
 		&stdout,
 		&stderr,
 	)
-
-	require.NoError(t, err, "failed executing command in deployment %q: %v", simpleAppClientDeploymentName, err)
-	return stdout.String(), stderr.String()
+	return stdout.String(), stderr.String(), err
 }
 
+// assertPacketSentFromClient sends a payload to the simple app service on the
+// given port and asserts the echo comes back (traffic allowed).
 func assertPacketSentFromClient(
 	ctx context.Context,
 	t *testing.T,
 	proto corev1.Protocol,
+	port int32,
 ) context.Context {
 	t.Helper()
 
-	payload, cmd := getProtoCmd(proto)
-	stdout, stderr := execInSimpleClientDeployment(ctx, t, cmd)
+	payload, cmd := getProtoCmd(proto, port)
+	stdout, stderr, err := execInSimpleClientDeploymentRaw(ctx, cmd)
+	require.NoError(t, err, "failed executing command in deployment %q: %v", simpleAppClientDeploymentName, err)
 	require.Empty(t, stderr)
 	require.Contains(t, stdout, payload, "client output should contain echoed payload")
+	return ctx
+}
+
+// assertPacketBlockedFromClient sends a payload to the simple app service on
+// the given port and asserts the echo never comes back (traffic blocked). The
+// client-side nc may still exit 0 when the data plane rejects the connection:
+// the reliable signal is the missing echo, so we keep retrying until the
+// payload stops being echoed.
+func assertPacketBlockedFromClient(
+	ctx context.Context,
+	t *testing.T,
+	proto corev1.Protocol,
+	port int32,
+) context.Context {
+	t.Helper()
+
+	payload, cmd := getProtoCmd(proto, port)
+	require.Eventually(t, func() bool {
+		stdout, _, err := execInSimpleClientDeploymentRaw(ctx, cmd)
+		if strings.Contains(stdout, payload) {
+			t.Logf("traffic to port %d still echoing (err=%v)", port, err)
+			return false
+		}
+		return true
+	}, defaultOperationTimeout, 1*time.Second,
+		"traffic to port %d should be blocked: payload %q should not be echoed", port, payload)
 	return ctx
 }

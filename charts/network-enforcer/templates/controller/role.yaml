@@ -9,9 +9,7 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - namespaces
   - pods
-  - services
   verbs:
   - get
   - list
@@ -30,6 +28,18 @@ rules:
   - networking.k8s.io
   resources:
   - networkpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - security.istio.io
+  resources:
+  - authorizationpolicies
   verbs:
   - create
   - delete

@@ -73,3 +73,12 @@ type PolicyDenyEvent struct {
 	// The K8s NetworkPolicies or CiliumNetworkPolicies denying the ingress of the flow
 	IngressEnforcedBy []Policy `json:"ingress_enforced_by,omitempty"`
 }
+
+// LearningEvent represents a learning event in the network enforcer.
+// todo!: we need to adapt this learning event to all the providers not just Istio.
+type LearningEvent struct {
+	DstName      string `json:"dst_name"`
+	DstNamespace string `json:"dst_namespace"`
+	DstPort      string `json:"dst_port"`
+	SrcIdentity  string `json:"src_identity"`
+}

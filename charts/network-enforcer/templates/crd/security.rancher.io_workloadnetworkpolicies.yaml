@@ -31,8 +31,8 @@ spec:
       openAPIV3Schema:
         description: |-
           WorkloadNetworkPolicy is the schema for the runtime network policy API.
-          It wraps a standard networkingv1.NetworkPolicySpec and selects a mode
-          (monitor or protect). The resource is intentionally namespaced and uses
+          Spec carries a backend-specific policy payload (Kubernetes or Istio) and a
+          mode (monitor or protect). The resource is intentionally namespaced and uses
           the `security.rancher.io` group to avoid colliding with the upstream
           `networking.k8s.io/NetworkPolicy` kind.
         properties:
@@ -57,20 +57,115 @@ spec:
             description: WorkloadNetworkPolicySpec defines the desired state of a
               WorkloadNetworkPolicy.
             properties:
-              mode:
-                default: monitor
-                description: |-
-                  Mode controls whether the policy is observed (monitor) or actively
-                  enforced (protect). Defaults to monitor.
+              backend:
+                description: Backend selects which backend policy model this object
+                  carries.
                 enum:
-                - monitor
-                - protect
+                - kubernetes
+                - istio
                 type: string
-              policyTemplate:
+                x-kubernetes-validations:
+                - message: backend is immutable
+                  rule: self == oldSelf
+              istio:
                 description: |-
-                  PolicyTemplate is the embedded networking.k8s.io NetworkPolicySpec that
-                  this resource represents at runtime. The semantics of the policy are
-                  selected by Mode; the spec itself is identical to a NetworkPolicySpec.
+                  Istio contains a constrained L4 policy model rendered as an Istio
+                  AuthorizationPolicy by the reconciler.
+                properties:
+                  rules:
+                    description: Rules is the ruleset.
+                    items:
+                      properties:
+                        from:
+                          description: From defines source identities for the rule.
+                          items:
+                            properties:
+                              source:
+                                description: Source defines the source identities
+                                  for the rule.
+                                properties:
+                                  principals:
+                                    description: Principals are the source SPIFFE
+                                      identities.
+                                    items:
+                                      type: string
+                                    type: array
+                                type: object
+                            type: object
+                          type: array
+                        to:
+                          description: To defines destination operations for the rule.
+                          items:
+                            properties:
+                              operation:
+                                description: Operation defines the destination operations
+                                  for the rule.
+                                properties:
+                                  ports:
+                                    description: Ports is the list of destination
+                                      ports.
+                                    items:
+                                      type: string
+                                    type: array
+                                type: object
+                            type: object
+                          type: array
+                      type: object
+                    type: array
+                  selector:
+                    description: Selector selects the destination workloads where
+                      the policy is enforced.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                required:
+                - selector
+                type: object
+              kubernetes:
+                description: |-
+                  Kubernetes contains the policy expressed as a standard Kubernetes
+                  NetworkPolicySpec.
                 properties:
                   egress:
                     description: |-
@@ -539,9 +634,23 @@ spec:
                     type: array
                     x-kubernetes-list-type: atomic
                 type: object
+              mode:
+                default: monitor
+                description: |-
+                  Mode controls whether the policy is observed (monitor) or actively
+                  enforced (protect). Defaults to monitor.
+                enum:
+                - monitor
+                - protect
+                type: string
             required:
-            - policyTemplate
+            - backend
             type: object
+            x-kubernetes-validations:
+            - message: backend must match exactly one populated backend spec
+              rule: 'self.backend == ''kubernetes'' ? (has(self.kubernetes) && !has(self.istio))
+                : (self.backend == ''istio'' ? (has(self.istio) && !has(self.kubernetes))
+                : false)'
           status:
             description: |-
               WorkloadNetworkPolicyStatus defines the observed state of a
@@ -578,17 +687,29 @@ spec:
                           - protect
                           type: string
                         denyingPolicyName:
-                          description: DenyingPolicyName is the name of the NetworkPolicy
-                            that denied the flow.
+                          description: |-
+                            DenyingPolicyName is the name of the WorkloadNetworkPolicy this violation
+                            belongs to. For a DENY it is the policy that denied the flow; for an
+                            ALLOW-miss it is the owning WorkloadNetworkPolicy resolved by selector match
+                            (see DenyingPolicyNamespace). The controller keys the violation to its WNP
+                            by this name for both cases; Action (monitor vs protect) distinguishes them.
                           type: string
                         denyingPolicyNamespace:
                           description: |-
-                            DenyingPolicyNamespace is the namespace of the NetworkPolicy that denied
-                            the flow.
+                            DenyingPolicyNamespace is the namespace of the WorkloadNetworkPolicy this
+                            violation belongs to. For a DENY it is the policy that denied the flow; for
+                            an ALLOW-miss (which carries no denying policy on the wire) the scraper
+                            resolves the owning WorkloadNetworkPolicy by matching the destination pod's
+                            labels against WNP selectors and records it here (see istio.Enricher).
                           type: string
                         dest:
                           description: Dest is the workload that received the traffic.
                           properties:
+                            identity:
+                              description: |-
+                                Identity is the provider-specific workload identity: SPIFFE for Istio,
+                                numeric security ID for Cilium, empty for Calico.
+                              type: string
                             namespace:
                               description: Namespace is the Kubernetes namespace of
                                 the workload.
@@ -602,9 +723,6 @@ spec:
                               description: OwnerName is the name of the owner resource.
                               type: string
                           type: object
-                        direction:
-                          description: Direction is the traffic direction.
-                          type: string
                         dstPort:
                           description: DstPort is the destination port. 0 when unavailable.
                           format: int32
@@ -624,16 +742,17 @@ spec:
                             negative, so the sign bit is never set in practice.
                           format: int64
                           type: integer
-                        nodeName:
-                          description: NodeName is the node whose cniwatcher reported
-                            the violation.
-                          type: string
                         protocol:
                           description: Protocol is the L4 protocol (TCP, UDP).
                           type: string
                         source:
                           description: Source is the workload that initiated the traffic.
                           properties:
+                            identity:
+                              description: |-
+                                Identity is the provider-specific workload identity: SPIFFE for Istio,
+                                numeric security ID for Cilium, empty for Calico.
+                              type: string
                             namespace:
                               description: Namespace is the Kubernetes namespace of
                                 the workload.
@@ -653,9 +772,7 @@ spec:
                           type: string
                       required:
                       - action
-                      - direction
                       - id
-                      - nodeName
                       - protocol
                       - timestamp
                       type: object
@@ -695,8 +812,11 @@ spec:
                   (max maxViolationRecords). Oldest entries are dropped when the
                   limit is reached.
                 items:
-                  description: ViolationRecord holds the details of a single network
-                    policy violation.
+                  description: |-
+                    ViolationRecord holds the details of a single network policy violation.
+                    It embeds ViolationInfo (the violation without the ID) so that the two
+                    types cannot drift apart: every violation field is defined once, in
+                    ViolationInfo.
                   properties:
                     action:
                       description: Action is the enforcement action taken (monitor
@@ -706,17 +826,29 @@ spec:
                       - protect
                       type: string
                     denyingPolicyName:
-                      description: DenyingPolicyName is the name of the NetworkPolicy
-                        that denied the flow.
+                      description: |-
+                        DenyingPolicyName is the name of the WorkloadNetworkPolicy this violation
+                        belongs to. For a DENY it is the policy that denied the flow; for an
+                        ALLOW-miss it is the owning WorkloadNetworkPolicy resolved by selector match
+                        (see DenyingPolicyNamespace). The controller keys the violation to its WNP
+                        by this name for both cases; Action (monitor vs protect) distinguishes them.
                       type: string
                     denyingPolicyNamespace:
                       description: |-
-                        DenyingPolicyNamespace is the namespace of the NetworkPolicy that denied
-                        the flow.
+                        DenyingPolicyNamespace is the namespace of the WorkloadNetworkPolicy this
+                        violation belongs to. For a DENY it is the policy that denied the flow; for
+                        an ALLOW-miss (which carries no denying policy on the wire) the scraper
+                        resolves the owning WorkloadNetworkPolicy by matching the destination pod's
+                        labels against WNP selectors and records it here (see istio.Enricher).
                       type: string
                     dest:
                       description: Dest is the workload that received the traffic.
                       properties:
+                        identity:
+                          description: |-
+                            Identity is the provider-specific workload identity: SPIFFE for Istio,
+                            numeric security ID for Cilium, empty for Calico.
+                          type: string
                         namespace:
                           description: Namespace is the Kubernetes namespace of the
                             workload.
@@ -730,9 +862,6 @@ spec:
                           description: OwnerName is the name of the owner resource.
                           type: string
                       type: object
-                    direction:
-                      description: Direction is the traffic direction.
-                      type: string
                     dstPort:
                       description: DstPort is the destination port. 0 when unavailable.
                       format: int32
@@ -752,16 +881,17 @@ spec:
                         negative, so the sign bit is never set in practice.
                       format: int64
                       type: integer
-                    nodeName:
-                      description: NodeName is the node whose cniwatcher reported
-                        the violation.
-                      type: string
                     protocol:
                       description: Protocol is the L4 protocol (TCP, UDP).
                       type: string
                     source:
                       description: Source is the workload that initiated the traffic.
                       properties:
+                        identity:
+                          description: |-
+                            Identity is the provider-specific workload identity: SPIFFE for Istio,
+                            numeric security ID for Cilium, empty for Calico.
+                          type: string
                         namespace:
                           description: Namespace is the Kubernetes namespace of the
                             workload.
@@ -781,9 +911,7 @@ spec:
                       type: string
                   required:
                   - action
-                  - direction
                   - id
-                  - nodeName
                   - protocol
                   - timestamp
                   type: object

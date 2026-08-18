@@ -2,8 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -14,101 +12,45 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
-	"github.com/rancher-sandbox/network-enforcer/internal/grpcexporter"
-	agentv1 "github.com/rancher-sandbox/network-enforcer/proto/agent/v1"
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 )
-
-// ---------------------------------------------------------------------------
-// Fake agent client
-// ---------------------------------------------------------------------------
-
-type fakeAgentClient struct {
-	violations []*agentv1.ViolationRecord
-	shouldFail bool
-}
-
-func (f *fakeAgentClient) ScrapeViolations(_ context.Context) ([]*agentv1.ViolationRecord, error) {
-	if f.shouldFail {
-		return nil, errors.New("fake scrape failure")
-	}
-	return f.violations, nil
-}
-
-func (f *fakeAgentClient) Close() error { return nil }
-
-// ---------------------------------------------------------------------------
-// Fake pool that bypasses real gRPC dialling
-// ---------------------------------------------------------------------------
-
-type fakePool struct {
-	nodeClients map[string]grpcexporter.AgentClientAPI
-}
-
-func (p *fakePool) UpdatePool(_ context.Context, _ client.Reader) (map[string]grpcexporter.AgentClientAPI, error) {
-	return p.nodeClients, nil
-}
-
-func (p *fakePool) MarkStaleAgentClient(nodeName string) {
-	if p.nodeClients == nil {
-		return
-	}
-	if c, ok := p.nodeClients[nodeName]; ok && c != nil {
-		_ = c.Close()
-	}
-	p.nodeClients[nodeName] = nil
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-func newCniwatcherPod(name, namespace, nodeName, ip string) *corev1.Pod {
-	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-			Labels:    map[string]string{"app.kubernetes.io/name": "network-enforcer-cniwatcher"},
-		},
-		Spec: corev1.PodSpec{
-			NodeName: nodeName,
-		},
-		Status: corev1.PodStatus{
-			PodIP: ip,
-		},
-	}
-}
-
-func newProtoViolation(
+//nolint:unparam // for now some params always receive the same value
+func newViolation(
 	ts time.Time,
-	nodeName string,
-	direction string,
 	srcNS string,
 	srcName string,
 	dstNS string,
 	dstName string,
 	denyNS string,
 	denyName string,
-) *agentv1.ViolationRecord {
-	return &agentv1.ViolationRecord{
-		Timestamp:              timestamppb.New(ts),
-		NodeName:               nodeName,
-		Direction:              direction,
-		SourceNamespace:        srcNS,
-		SourceName:             srcName,
-		SourceWorkloads:        []string{"Deployment/" + srcName},
-		DestNamespace:          dstNS,
-		DestName:               dstName,
-		DestWorkloads:          []string{"Service/" + dstName},
-		Protocol:               "TCP",
-		DstPort:                80,
-		Action:                 "protect",
-		DenyingPolicyNamespace: denyNS,
-		DenyingPolicyName:      denyName,
+) violation.Observation {
+	return violation.Observation{
+		ViolationInfo: securityv1alpha1.ViolationInfo{
+			Timestamp: metav1.NewTime(ts),
+			Source: securityv1alpha1.WorkloadRef{
+				Namespace: srcNS,
+				OwnerKind: "Deployment",
+				OwnerName: srcName,
+			},
+			Dest: securityv1alpha1.WorkloadRef{
+				Namespace: dstNS,
+				OwnerKind: "Service",
+				OwnerName: dstName,
+			},
+			Protocol:               corev1.ProtocolTCP,
+			DstPort:                80,
+			Action:                 securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+			DenyingPolicyNamespace: denyNS,
+			DenyingPolicyName:      denyName,
+		},
 	}
 }
 
@@ -116,11 +58,22 @@ func newProtoViolation(
 // Tests
 // ---------------------------------------------------------------------------
 
+// TestCorrelateViolationsToWNPs verifies the controller keys already-enriched
+// observations to their owning WorkloadNetworkPolicy. Both DENY and ALLOW-miss
+// observations carry the owning policy in DenyingPolicyNamespace/Name by the
+// time they reach the controller (the scraper resolves the ALLOW-miss owner by
+// selector match, see istio.Enricher), so the controller no longer inspects pod
+// labels — it only keys by the recorded policy name and drops what it cannot
+// correlate.
 func TestCorrelateViolationsToWNPs(t *testing.T) {
 	t.Parallel()
 
 	npKey := types.NamespacedName{Namespace: "ns1", Name: "policy-1"}
 	wnpKey := types.NamespacedName{Namespace: "ns1", Name: "policy-1"}
+	// allowMissWNPKey is the owning WNP the scraper resolved for an ALLOW-miss.
+	// Its name is arbitrary (user-chosen) on purpose: correlation keys on the
+	// recorded name, whatever it is.
+	allowMissWNPKey := types.NamespacedName{Namespace: "ns1", Name: "user-named-wnp"}
 	ownedIndex := map[types.NamespacedName]*types.NamespacedName{
 		npKey: &wnpKey,
 	}
@@ -131,6 +84,12 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 				Namespace: wnpKey.Namespace,
 			},
 		},
+		allowMissWNPKey: {
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      allowMissWNPKey.Name,
+				Namespace: allowMissWNPKey.Namespace,
+			},
+		},
 	}
 
 	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -138,17 +97,15 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 	tests := []struct {
 		name       string
 		sync       *WorkloadNetworkPolicyStatusSync
-		violations []*agentv1.ViolationRecord
+		violations []violation.Observation
 		check      func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord)
 	}{
 		{
-			name: "attributes_egress_deny_to_WNP",
+			name: "attributes_deny_to_WNP",
 			sync: &WorkloadNetworkPolicyStatusSync{},
-			violations: []*agentv1.ViolationRecord{
-				newProtoViolation(
+			violations: []violation.Observation{
+				newViolation(
 					ts,
-					"node-1",
-					string(networkingv1.PolicyTypeEgress),
 					"src-ns",
 					"src-app",
 					"dst-ns",
@@ -161,54 +118,63 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 				require.Len(t, result, 1)
 				require.Contains(t, result, wnpKey)
 				require.Len(t, result[wnpKey], 1)
-				require.Equal(t, networkingv1.PolicyTypeEgress, result[wnpKey][0].Direction)
-				require.Equal(t, "node-1", result[wnpKey][0].NodeName)
 				require.Equal(t, "ns1", result[wnpKey][0].DenyingPolicyNamespace)
 				require.Equal(t, "policy-1", result[wnpKey][0].DenyingPolicyName)
 			},
 		},
 		{
-			name: "attributes_ingress_deny_to_WNP",
+			// A pre-resolved ALLOW-miss carries its owning WNP in the same fields as
+			// a DENY (resolved by the scraper), so the controller keys it the same
+			// way, regardless of the WNP's user-chosen name.
+			name: "keys_pre_resolved_allow_miss_by_owning_WNP",
 			sync: &WorkloadNetworkPolicyStatusSync{},
-			violations: []*agentv1.ViolationRecord{
-				newProtoViolation(
+			violations: []violation.Observation{
+				newViolation(
 					ts,
-					"node-1",
-					string(networkingv1.PolicyTypeIngress),
 					"src-ns",
 					"src-app",
-					"dst-ns",
-					"dst-svc",
-					"ns1",
-					"policy-1",
+					allowMissWNPKey.Namespace,
+					"frontend",
+					allowMissWNPKey.Namespace,
+					allowMissWNPKey.Name,
 				),
 			},
 			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
 				require.Len(t, result, 1)
-				require.Contains(t, result, wnpKey)
-				require.Len(t, result[wnpKey], 1)
-				require.Equal(t, networkingv1.PolicyTypeIngress, result[wnpKey][0].Direction)
+				require.Contains(t, result, allowMissWNPKey)
+				require.Len(t, result[allowMissWNPKey], 1)
 			},
 		},
 		{
-			name: "drops_deny_by_unowned_NetworkPolicy",
-			sync: func() *WorkloadNetworkPolicyStatusSync {
-				rawNP := &networkingv1.NetworkPolicy{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "raw-policy",
-						Namespace: "ns-other",
-					},
-				}
-				return &WorkloadNetworkPolicyStatusSync{
-					Client: fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(rawNP).Build(),
-					logger: ctrl.Log.WithName("test"),
-				}
-			}(),
-			violations: []*agentv1.ViolationRecord{
-				newProtoViolation(
+			// An observation the scraper could not correlate (no owning policy
+			// resolved) carries an empty policy name and is dropped.
+			name: "drops_uncorrelated_observation",
+			sync: &WorkloadNetworkPolicyStatusSync{},
+			violations: []violation.Observation{
+				newViolation(
 					ts,
-					"node-1",
-					string(networkingv1.PolicyTypeEgress),
+					"src-ns",
+					"src-app",
+					"dst-ns",
+					"dst-svc",
+					"",
+					"",
+				),
+			},
+			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
+				require.Empty(t, result)
+			},
+		},
+		{
+			// The recorded policy is not owned by us (a NetworkPolicy shares a WNP's
+			// name but has no controller owner ref), so the violation is dropped.
+			name: "drops_deny_by_unowned_NetworkPolicy",
+			sync: &WorkloadNetworkPolicyStatusSync{
+				logger: ctrl.Log.WithName("test"),
+			},
+			violations: []violation.Observation{
+				newViolation(
+					ts,
 					"src-ns",
 					"src-app",
 					"dst-ns",
@@ -222,16 +188,13 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			},
 		},
 		{
-			name: "warns_when_denying_NetworkPolicy_is_deleted",
+			name: "warns_when_denying_WNP_is_deleted",
 			sync: &WorkloadNetworkPolicyStatusSync{
-				Client: fake.NewClientBuilder().WithScheme(newTestScheme()).Build(),
 				logger: ctrl.Log.WithName("test"),
 			},
-			violations: []*agentv1.ViolationRecord{
-				newProtoViolation(
+			violations: []violation.Observation{
+				newViolation(
 					ts,
-					"node-1",
-					string(networkingv1.PolicyTypeEgress),
 					"src-ns",
 					"src-app",
 					"dst-ns",
@@ -245,33 +208,11 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 			},
 		},
 		{
-			name: "drops_deny_with_empty_denying_policy",
-			sync: &WorkloadNetworkPolicyStatusSync{logger: ctrl.Log.WithName("test")},
-			violations: []*agentv1.ViolationRecord{
-				newProtoViolation(
-					ts,
-					"node-1",
-					string(networkingv1.PolicyTypeEgress),
-					"src-ns",
-					"src-app",
-					"dst-ns",
-					"dst-svc",
-					"",
-					"",
-				),
-			},
-			check: func(t *testing.T, result map[types.NamespacedName][]securityv1alpha1.ViolationRecord) {
-				require.Empty(t, result)
-			},
-		},
-		{
 			name: "dedup_by_violation_key",
 			sync: &WorkloadNetworkPolicyStatusSync{},
-			violations: []*agentv1.ViolationRecord{
-				newProtoViolation(
+			violations: []violation.Observation{
+				newViolation(
 					ts,
-					"node-1",
-					string(networkingv1.PolicyTypeEgress),
 					"src-ns",
 					"src-app",
 					"dst-ns",
@@ -279,10 +220,8 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 					"ns1",
 					"policy-1",
 				),
-				newProtoViolation(
+				newViolation(
 					ts,
-					"node-2",
-					string(networkingv1.PolicyTypeEgress),
 					"src-ns",
 					"src-app",
 					"dst-ns",
@@ -309,64 +248,6 @@ func TestCorrelateViolationsToWNPs(t *testing.T) {
 	}
 }
 
-func TestScrapeAllNodes(t *testing.T) {
-	t.Parallel()
-
-	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-
-	tests := []struct {
-		name    string
-		clients map[string]grpcexporter.AgentClientAPI
-		check   func(t *testing.T, results []*agentv1.ViolationRecord)
-	}{
-		{
-			name: "scrapes_reachable_nodes_and_skips_unreachable",
-			clients: map[string]grpcexporter.AgentClientAPI{
-				"node-1": &fakeAgentClient{
-					violations: []*agentv1.ViolationRecord{
-						newProtoViolation(
-							ts,
-							"node-1",
-							string(networkingv1.PolicyTypeEgress),
-							"ns1",
-							"app1",
-							"ns2",
-							"svc1",
-							"ns1",
-							"policy-1",
-						),
-					},
-				},
-				"node-2": &fakeAgentClient{shouldFail: true},
-				"node-3": nil, // unreachable
-			},
-			check: func(t *testing.T, results []*agentv1.ViolationRecord) {
-				require.Len(t, results, 1)
-				require.Equal(t, "node-1", results[0].GetNodeName())
-			},
-		},
-		{
-			name:    "empty_clients_map_returns_empty",
-			clients: map[string]grpcexporter.AgentClientAPI{},
-			check: func(t *testing.T, results []*agentv1.ViolationRecord) {
-				require.Empty(t, results)
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			sync := &WorkloadNetworkPolicyStatusSync{
-				agentClientPool: &fakePool{},
-				logger:          ctrl.Log.WithName("test"),
-			}
-			results := sync.scrapeAllNodes(context.Background(), tt.clients)
-			tt.check(t, results)
-		})
-	}
-}
-
 func TestProcessWorkloadNetworkPolicy_TwoPhasePatch(t *testing.T) {
 	t.Parallel()
 
@@ -389,28 +270,27 @@ func TestProcessWorkloadNetworkPolicy_TwoPhasePatch(t *testing.T) {
 		Build()
 
 	sync := &WorkloadNetworkPolicyStatusSync{
-		Client:          fakeClient,
-		agentClientPool: &fakePool{},
-		updateInterval:  time.Hour,
-		logger:          ctrl.Log.WithName("test"),
+		Client:         fakeClient,
+		updateInterval: time.Hour,
+		logger:         ctrl.Log.WithName("test"),
 	}
 
 	violations := []securityv1alpha1.ViolationRecord{
 		{
-			Timestamp: metav1.NewTime(now.Add(-10 * time.Minute)),
-			NodeName:  "node-1",
-			Direction: networkingv1.PolicyTypeEgress,
-			Source: securityv1alpha1.WorkloadRef{
-				Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
+			ViolationInfo: securityv1alpha1.ViolationInfo{
+				Timestamp: metav1.NewTime(now.Add(-10 * time.Minute)),
+				Source: securityv1alpha1.WorkloadRef{
+					Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
+				},
+				Dest: securityv1alpha1.WorkloadRef{
+					Namespace: "dst-ns", OwnerKind: "Service", OwnerName: "svc",
+				},
+				Protocol:               corev1.ProtocolTCP,
+				DstPort:                80,
+				Action:                 "protect",
+				DenyingPolicyNamespace: "ns1",
+				DenyingPolicyName:      "policy-1",
 			},
-			Dest: securityv1alpha1.WorkloadRef{
-				Namespace: "dst-ns", OwnerKind: "Service", OwnerName: "svc",
-			},
-			Protocol:               corev1.ProtocolTCP,
-			DstPort:                80,
-			Action:                 "protect",
-			DenyingPolicyNamespace: "ns1",
-			DenyingPolicyName:      "policy-1",
 		},
 	}
 
@@ -471,47 +351,6 @@ func TestBuildOwnershipIndex(t *testing.T) {
 	require.Nil(t, owner)
 }
 
-func TestConvertProtoViolation(t *testing.T) {
-	t.Parallel()
-
-	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	pbViolation := newProtoViolation(ts, "node-1", string(networkingv1.PolicyTypeEgress),
-		"src-ns", "src-app", "dst-ns", "dst-svc",
-		"policy-ns", "policy-name")
-
-	rec := convertProtoViolation(pbViolation)
-
-	require.Equal(t, networkingv1.PolicyTypeEgress, rec.Direction)
-	require.Equal(t, "node-1", rec.NodeName)
-	require.Equal(t, "src-ns", rec.Source.Namespace)
-	require.Equal(t, "Deployment", rec.Source.OwnerKind)
-	require.Equal(t, "src-app", rec.Source.OwnerName)
-	require.Equal(t, "dst-ns", rec.Dest.Namespace)
-	require.Equal(t, "Service", rec.Dest.OwnerKind)
-	require.Equal(t, "dst-svc", rec.Dest.OwnerName)
-	require.Equal(t, corev1.ProtocolTCP, rec.Protocol)
-	require.Equal(t, int32(80), rec.DstPort)
-	require.Equal(t, securityv1alpha1.WorkloadNetworkPolicyModeProtect, rec.Action)
-	require.Equal(t, "policy-ns", rec.DenyingPolicyNamespace)
-	require.Equal(t, "policy-name", rec.DenyingPolicyName)
-}
-
-func TestParseWorkload(t *testing.T) {
-	t.Parallel()
-
-	kind, name := parseWorkload([]string{"Deployment/myapp"})
-	require.Equal(t, "Deployment", kind)
-	require.Equal(t, "myapp", name)
-
-	kind, name = parseWorkload([]string{"myapp"})
-	require.Empty(t, kind)
-	require.Equal(t, "myapp", name)
-
-	kind, name = parseWorkload(nil)
-	require.Empty(t, kind)
-	require.Empty(t, name)
-}
-
 func TestSyncSkipsWhenNoWNPs(t *testing.T) {
 	t.Parallel()
 
@@ -519,34 +358,14 @@ func TestSyncSkipsWhenNoWNPs(t *testing.T) {
 		WithScheme(newTestScheme()).
 		Build()
 
-	pool := &fakePool{nodeClients: map[string]grpcexporter.AgentClientAPI{}}
-
 	sync := &WorkloadNetworkPolicyStatusSync{
-		Client:          fakeClient,
-		agentClientPool: pool,
-		updateInterval:  time.Hour,
-		logger:          ctrl.Log.WithName("test"),
+		Client:         fakeClient,
+		updateInterval: time.Hour,
+		logger:         ctrl.Log.WithName("test"),
 	}
 
 	err := sync.sync(context.Background())
 	require.NoError(t, err)
-}
-
-// Test that the fake pool's MarkStaleAgentClient works correctly.
-func TestFakePoolMarkStale(t *testing.T) {
-	t.Parallel()
-
-	pool := &fakePool{
-		nodeClients: map[string]grpcexporter.AgentClientAPI{
-			"node-1": &fakeAgentClient{},
-		},
-	}
-
-	pool.MarkStaleAgentClient("node-1")
-	require.Nil(t, pool.nodeClients["node-1"])
-
-	// Marking again should not panic.
-	pool.MarkStaleAgentClient("node-1")
 }
 
 // TestNewWorkloadNetworkPolicyStatusSync validates config.
@@ -560,111 +379,6 @@ func TestNewWorkloadNetworkPolicyStatusSync(t *testing.T) {
 	require.Contains(t, err.Error(), "invalid update interval")
 }
 
-// Test that the gRPC exporter pool creation works with valid config.
-func TestAgentClientPoolDefaults(t *testing.T) {
-	t.Parallel()
-
-	pool, err := grpcexporter.NewAgentClientPool(grpcexporter.AgentClientPoolConfig{
-		AgentFactoryConfig: grpcexporter.AgentFactoryConfig{
-			Port: 50051,
-		},
-		Namespace:           "test-ns",
-		LabelSelectorString: grpcexporter.DefaultCniwatcherLabelSelectorString,
-		Logger:              slog.Default(),
-	})
-	require.NoError(t, err)
-	require.NotNil(t, pool)
-}
-
-func TestAgentClientPoolUpdatePool(t *testing.T) {
-	t.Parallel()
-
-	// We need a full scheme for the fake client.
-	s := newTestScheme()
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(s).
-		WithObjects(
-			newCniwatcherPod("cniwatcher-1", "test-ns", "node-1", "10.0.0.1"),
-			newCniwatcherPod("cniwatcher-2", "test-ns", "node-2", "10.0.0.2"),
-		).
-		Build()
-
-	// Create a pool with a factory that dials.
-	// grpc.NewClient is lazy so creation will succeed even without a
-	// real gRPC server. We verify the pool correctly discovers pods.
-	pool, err := grpcexporter.NewAgentClientPool(grpcexporter.AgentClientPoolConfig{
-		AgentFactoryConfig: grpcexporter.AgentFactoryConfig{
-			Port: 50051,
-		},
-		Namespace:           "test-ns",
-		LabelSelectorString: "app.kubernetes.io/name=network-enforcer-cniwatcher",
-		Logger:              slog.Default(),
-	})
-	require.NoError(t, err)
-
-	clients, err := pool.UpdatePool(context.Background(), fakeClient)
-	require.NoError(t, err)
-	require.Len(t, clients, 2)
-	// Both nodes are present (entries are non-nil because grpc.NewClient
-	// is lazy and does not dial during construction).
-	require.Contains(t, clients, "node-1")
-	require.Contains(t, clients, "node-2")
-	require.NotNil(t, clients["node-1"])
-	require.NotNil(t, clients["node-2"])
-
-	// Mark a client stale and verify it becomes nil.
-	pool.MarkStaleAgentClient("node-1")
-	require.Nil(t, clients["node-1"])
-}
-
-// TestSyncLoopIntegration runs a full sync cycle with real fake objects.
-func TestSyncLoopIntegration(t *testing.T) {
-	t.Parallel()
-
-	now := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
-
-	wnp := newTestWNP("my-policy", "default")
-	ownedNP := newOwnedNetworkPolicy(wnp)
-
-	// Build the fake client with the WNP and its owned NetworkPolicy.
-	s := newTestScheme()
-	statusObj := &securityv1alpha1.WorkloadNetworkPolicy{}
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(s).
-		WithStatusSubresource(statusObj).
-		WithObjects(wnp, ownedNP).
-		Build()
-
-	// Create a fake pool that returns one node with a violation.
-	pool := &fakePool{
-		nodeClients: map[string]grpcexporter.AgentClientAPI{
-			"node-1": &fakeAgentClient{
-				violations: []*agentv1.ViolationRecord{
-					newProtoViolation(now, "node-1", string(networkingv1.PolicyTypeEgress),
-						"src-ns", "src-app", "dst-ns", "dst-svc",
-						"default", "my-policy"),
-				},
-			},
-		},
-	}
-
-	sync := newTestWorkloadNetworkStatusSync(fakeClient).withPool(pool)
-	require.NoError(t, sync.sync(t.Context()))
-
-	// Verify the WNP status was updated.
-	var updatedWNP securityv1alpha1.WorkloadNetworkPolicy
-	require.NoError(t, fakeClient.Get(
-		context.Background(),
-		types.NamespacedName{Namespace: "default", Name: "my-policy"},
-		&updatedWNP,
-	))
-	require.Equal(t, int64(1), updatedWNP.Status.ViolationCount)
-	require.Equal(t, int64(1), updatedWNP.Status.ActiveViolationCount)
-	require.Len(t, updatedWNP.Status.Violations, 1)
-	require.Equal(t, networkingv1.PolicyTypeEgress, updatedWNP.Status.Violations[0].Direction)
-	require.Equal(t, "src-app", updatedWNP.Status.Violations[0].Source.OwnerName)
-}
-
 func TestSyncClearsViolationsWithNoNewScrapedViolations(t *testing.T) {
 	t.Parallel()
 
@@ -676,7 +390,7 @@ func TestSyncClearsViolationsWithNoNewScrapedViolations(t *testing.T) {
 	wnp := newTestWNP("policy-1", "ns1")
 	// Add an egress rule to the policy template that permits the traffic
 	// that was previously denied and recorded as a violation.
-	wnp.Spec.PolicyTemplate.Egress = []networkingv1.NetworkPolicyEgressRule{
+	wnp.Spec.Kubernetes.Egress = []networkingv1.NetworkPolicyEgressRule{
 		{
 			To: []networkingv1.NetworkPolicyPeer{
 				{
@@ -702,21 +416,21 @@ func TestSyncClearsViolationsWithNoNewScrapedViolations(t *testing.T) {
 		ActiveViolationCount: 1,
 		Violations: []securityv1alpha1.ViolationRecord{
 			{
-				ID:        0,
-				Timestamp: metav1.NewTime(now.Add(-10 * time.Minute)),
-				NodeName:  "node-1",
-				Direction: networkingv1.PolicyTypeEgress,
-				Source: securityv1alpha1.WorkloadRef{
-					Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
+				ID: 0,
+				ViolationInfo: securityv1alpha1.ViolationInfo{
+					Timestamp: metav1.NewTime(now.Add(-10 * time.Minute)),
+					Source: securityv1alpha1.WorkloadRef{
+						Namespace: "src-ns", OwnerKind: "Deployment", OwnerName: "app",
+					},
+					Dest: securityv1alpha1.WorkloadRef{
+						Namespace: "dst-ns", OwnerKind: "Service", OwnerName: "svc",
+					},
+					Protocol:               corev1.ProtocolTCP,
+					DstPort:                80,
+					Action:                 "protect",
+					DenyingPolicyNamespace: "ns1",
+					DenyingPolicyName:      "policy-1",
 				},
-				Dest: securityv1alpha1.WorkloadRef{
-					Namespace: "dst-ns", OwnerKind: "Service", OwnerName: "svc",
-				},
-				Protocol:               corev1.ProtocolTCP,
-				DstPort:                80,
-				Action:                 "protect",
-				DenyingPolicyNamespace: "ns1",
-				DenyingPolicyName:      "policy-1",
 			},
 		},
 	}
@@ -731,10 +445,7 @@ func TestSyncClearsViolationsWithNoNewScrapedViolations(t *testing.T) {
 		WithObjects(wnp, ownedNP).
 		Build()
 
-	// Pool with no reachable nodes → empty scrape → zero violations.
-	pool := &fakePool{nodeClients: map[string]grpcexporter.AgentClientAPI{}}
-
-	sync := newTestWorkloadNetworkStatusSync(fakeClient).withPool(pool)
+	sync := newTestWorkloadNetworkStatusSync(fakeClient)
 
 	require.NoError(t, sync.sync(t.Context()))
 
@@ -781,20 +492,20 @@ func TestTwoPhasePatchConflict(t *testing.T) {
 
 	violations := []securityv1alpha1.ViolationRecord{
 		{
-			Timestamp: metav1.NewTime(time.Now()),
-			NodeName:  "node-1",
-			Direction: networkingv1.PolicyTypeEgress,
-			Source: securityv1alpha1.WorkloadRef{
-				Namespace: "ns1", OwnerKind: "Deployment", OwnerName: "app",
+			ViolationInfo: securityv1alpha1.ViolationInfo{
+				Timestamp: metav1.NewTime(time.Now()),
+				Source: securityv1alpha1.WorkloadRef{
+					Namespace: "ns1", OwnerKind: "Deployment", OwnerName: "app",
+				},
+				Dest: securityv1alpha1.WorkloadRef{
+					Namespace: "ns2", OwnerKind: "Service", OwnerName: "svc",
+				},
+				Protocol:               corev1.ProtocolTCP,
+				DstPort:                80,
+				Action:                 "protect",
+				DenyingPolicyNamespace: "ns1",
+				DenyingPolicyName:      "conflict-policy",
 			},
-			Dest: securityv1alpha1.WorkloadRef{
-				Namespace: "ns2", OwnerKind: "Service", OwnerName: "svc",
-			},
-			Protocol:               corev1.ProtocolTCP,
-			DstPort:                80,
-			Action:                 "protect",
-			DenyingPolicyNamespace: "ns1",
-			DenyingPolicyName:      "conflict-policy",
 		},
 	}
 

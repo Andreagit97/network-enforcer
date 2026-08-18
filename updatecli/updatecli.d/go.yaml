@@ -32,7 +32,6 @@ targets:
     spec:
       files:
         - package/Dockerfile.controller
-        - package/Dockerfile.cniwatcher
       instruction:
         keyword: FROM
         matcher: registry.suse.com/bci/golang

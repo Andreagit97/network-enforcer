@@ -72,8 +72,8 @@ func (r *WorkloadNetworkPolicyProposalReconciler) Reconcile(
 			Namespace: proposal.Namespace,
 		},
 		Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
-			Mode:           mode,
-			PolicyTemplate: proposal.Spec,
+			Mode:              mode,
+			PolicyBackendSpec: proposal.Spec.PolicyBackendSpec,
 		},
 	}
 	if err = policy.SetPromotedLabel(proposal.Name); err != nil {

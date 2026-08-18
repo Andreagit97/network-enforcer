@@ -3,7 +3,6 @@ FROM registry.suse.com/bci/golang:1.26.5 AS builder
 WORKDIR /src
 COPY api/ /src/api
 COPY cmd/ /src/cmd
-COPY proto/ /src/proto
 COPY internal/ /src/internal
 COPY go.mod go.sum /src/
 COPY Makefile /src/

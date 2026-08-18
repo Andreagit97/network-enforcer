@@ -2,136 +2,6 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
-        "cniwatcher": {
-            "type": "object",
-            "properties": {
-                "calico": {
-                    "type": "object",
-                    "properties": {
-                        "goldmaneEndpoint": {
-                            "type": "string"
-                        }
-                    },
-                    "additionalProperties": false
-                },
-                "cilium": {
-                    "type": "object",
-                    "properties": {
-                        "hubbleEndpoint": {
-                            "type": "string"
-                        }
-                    },
-                    "additionalProperties": false
-                },
-                "cniType": {
-                    "type": "string"
-                },
-                "containerSecurityContext": {
-                    "type": "object",
-                    "properties": {
-                        "allowPrivilegeEscalation": {
-                            "type": "boolean"
-                        },
-                        "capabilities": {
-                            "type": "object",
-                            "properties": {
-                                "drop": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string"
-                                    }
-                                }
-                            },
-                            "additionalProperties": false
-                        },
-                        "runAsUser": {
-                            "type": "integer"
-                        }
-                    },
-                    "additionalProperties": false
-                },
-                "grpcPort": {
-                    "type": "integer"
-                },
-                "image": {
-                    "type": "object",
-                    "properties": {
-                        "pullPolicy": {
-                            "type": "string"
-                        },
-                        "repository": {
-                            "type": "string"
-                        },
-                        "tag": {
-                            "type": "string"
-                        }
-                    },
-                    "additionalProperties": false
-                },
-                "podSecurityContext": {
-                    "type": "object",
-                    "properties": {
-                        "runAsNonRoot": {
-                            "type": "boolean"
-                        },
-                        "seccompProfile": {
-                            "type": "object",
-                            "properties": {
-                                "type": {
-                                    "type": "string"
-                                }
-                            },
-                            "additionalProperties": false
-                        }
-                    },
-                    "additionalProperties": false
-                },
-                "resources": {
-                    "type": "object",
-                    "properties": {
-                        "limits": {
-                            "type": "object",
-                            "properties": {
-                                "cpu": {
-                                    "type": "string"
-                                },
-                                "memory": {
-                                    "type": "string"
-                                }
-                            },
-                            "additionalProperties": false
-                        },
-                        "requests": {
-                            "type": "object",
-                            "properties": {
-                                "cpu": {
-                                    "type": "string"
-                                },
-                                "memory": {
-                                    "type": "string"
-                                }
-                            },
-                            "additionalProperties": false
-                        }
-                    },
-                    "additionalProperties": false
-                },
-                "serviceAccount": {
-                    "type": "object",
-                    "properties": {
-                        "annotations": {
-                            "type": "object",
-                            "additionalProperties": false
-                        }
-                    },
-                    "additionalProperties": false
-                },
-                "tolerations": {
-                    "type": "array"
-                }
-            },
-            "additionalProperties": false
-        },
         "controller": {
             "type": "object",
             "properties": {
@@ -168,9 +38,6 @@
                         }
                     },
                     "additionalProperties": false
-                },
-                "drainFlowsInterval": {
-                    "type": "string"
                 },
                 "env": {
                     "type": "array"
@@ -216,6 +83,29 @@
                                 }
                             },
                             "additionalProperties": false
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "provider": {
+                    "type": "object",
+                    "required": [
+                        "name"
+                    ],
+                    "properties": {
+                        "endpoint": {
+                            "type": [
+                                "integer",
+                                "string"
+                            ]
+                        },
+                        "name": {
+                            "type": "string",
+                            "enum": [
+                                "istio",
+                                "cilium",
+                                "calico"
+                            ]
                         }
                     },
                     "additionalProperties": false
@@ -285,175 +175,6 @@
         },
         "kubernetesClusterDomain": {
             "type": "string"
-        },
-        "obi": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "properties": {
-                        "data": {
-                            "type": "object",
-                            "properties": {
-                                "attributes": {
-                                    "type": "object",
-                                    "properties": {
-                                        "kubernetes": {
-                                            "type": "object",
-                                            "properties": {
-                                                "enable": {
-                                                    "type": "boolean"
-                                                }
-                                            },
-                                            "additionalProperties": false
-                                        },
-                                        "select": {
-                                            "type": "object",
-                                            "properties": {
-                                                "obi_network_flow_bytes": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                        "include": {
-                                                            "type": "array",
-                                                            "items": {
-                                                                "type": "string"
-                                                            }
-                                                        }
-                                                    },
-                                                    "additionalProperties": false
-                                                }
-                                            },
-                                            "additionalProperties": false
-                                        }
-                                    },
-                                    "additionalProperties": false
-                                },
-                                "metrics": {
-                                    "type": "object",
-                                    "properties": {
-                                        "features": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "string"
-                                            }
-                                        }
-                                    },
-                                    "additionalProperties": false
-                                },
-                                "otel_metrics_export": {
-                                    "type": "object",
-                                    "properties": {
-                                        "endpoint": {
-                                            "type": "string"
-                                        },
-                                        "interval": {
-                                            "type": "string"
-                                        },
-                                        "protocol": {
-                                            "type": "string"
-                                        }
-                                    },
-                                    "additionalProperties": false
-                                },
-                                "otel_traces_export": {
-                                    "type": "object",
-                                    "properties": {
-                                        "endpoint": {
-                                            "type": "string"
-                                        }
-                                    },
-                                    "additionalProperties": false
-                                }
-                            },
-                            "additionalProperties": true
-                        }
-                    },
-                    "additionalProperties": true
-                },
-                "enabled": {
-                    "type": "boolean"
-                },
-                "env": {
-                    "type": "object",
-                    "properties": {
-                        "OTEL_EXPORTER_OTLP_METRICS_CERTIFICATE": {
-                            "type": "string"
-                        },
-                        "OTEL_EXPORTER_OTLP_METRICS_CLIENT_CERTIFICATE": {
-                            "type": "string"
-                        },
-                        "OTEL_EXPORTER_OTLP_METRICS_CLIENT_KEY": {
-                            "type": "string"
-                        }
-                    },
-                    "additionalProperties": false
-                },
-                "preset": {
-                    "type": "string"
-                },
-                "volumeMounts": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "mountPath": {
-                                "type": "string"
-                            },
-                            "name": {
-                                "type": "string"
-                            },
-                            "readOnly": {
-                                "type": "boolean"
-                            }
-                        },
-                        "additionalProperties": false
-                    }
-                },
-                "volumes": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "csi": {
-                                "type": "object",
-                                "properties": {
-                                    "driver": {
-                                        "type": "string"
-                                    },
-                                    "readOnly": {
-                                        "type": "boolean"
-                                    },
-                                    "volumeAttributes": {
-                                        "type": "object",
-                                        "properties": {
-                                            "csi.cert-manager.io/dns-names": {
-                                                "type": "string"
-                                            },
-                                            "csi.cert-manager.io/issuer-kind": {
-                                                "type": "string"
-                                            },
-                                            "csi.cert-manager.io/issuer-name": {
-                                                "type": "string"
-                                            }
-                                        },
-                                        "additionalProperties": false
-                                    }
-                                },
-                                "additionalProperties": false
-                            },
-                            "name": {
-                                "type": "string"
-                            }
-                        },
-                        "additionalProperties": false
-                    }
-                }
-            },
-            "additionalProperties": true
-        },
-        "opentelemetry-ebpf-instrumentation": {
-            "type": "object",
-            "additionalProperties": true
         },
         "telemetry": {
             "type": "object",
