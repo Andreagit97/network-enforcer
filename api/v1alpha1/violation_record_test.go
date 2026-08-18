@@ -195,7 +195,7 @@ func TestMergeScrapedViolations(t *testing.T) {
 					withID(0).withTimestamp(baseTS.Time.Add(101 * time.Minute)),
 			},
 			initialStatus: func() WorkloadNetworkPolicyStatus {
-				r := make([]ViolationRecord, MaxViolationRecords)
+				r := make([]ViolationRecord, maxViolationRecords)
 				for i := range r {
 					r[i] = baseViolation.withDest("ns2", fmt.Sprintf("svc-%d", i+1)).
 						withDstPort(int32(i + 1)).
@@ -208,7 +208,7 @@ func TestMergeScrapedViolations(t *testing.T) {
 				}
 			}(),
 			expectedStatus: func() WorkloadNetworkPolicyStatus {
-				r := make([]ViolationRecord, MaxViolationRecords+1)
+				r := make([]ViolationRecord, maxViolationRecords+1)
 				for i := range r {
 					r[i] = baseViolation.withDest("ns2", fmt.Sprintf("svc-%d", i+1)).
 						withDstPort(int32(i + 1)).
@@ -217,7 +217,7 @@ func TestMergeScrapedViolations(t *testing.T) {
 				}
 				// Replace the last entry with the overflow record.
 				// The merge assigns ID = ViolationCount (100) before incrementing.
-				r[MaxViolationRecords] = baseViolation.withDest("ns2", "overflow").
+				r[maxViolationRecords] = baseViolation.withDest("ns2", "overflow").
 					withDstPort(9999).
 					withID(100).
 					withTimestamp(baseTS.Time.Add(101 * time.Minute))
@@ -225,7 +225,7 @@ func TestMergeScrapedViolations(t *testing.T) {
 					return b.Timestamp.Time.Compare(a.Timestamp.Time)
 				})
 				return WorkloadNetworkPolicyStatus{
-					Violations:     r[:MaxViolationRecords],
+					Violations:     r[:maxViolationRecords],
 					ViolationCount: 101,
 				}
 			}(),
@@ -696,7 +696,7 @@ func TestAcknowledgeViolationsFromAnnotations(t *testing.T) {
 			},
 			violations: []ViolationRecord{newViolation(101)},
 			acknowledged: func() []AcknowledgedViolationRecord {
-				r := make([]AcknowledgedViolationRecord, MaxViolationRecords)
+				r := make([]AcknowledgedViolationRecord, maxViolationRecords)
 				for i := range r {
 					r[i] = newAck(int64(i), "acknowledged", now)
 				}
@@ -705,15 +705,15 @@ func TestAcknowledgeViolationsFromAnnotations(t *testing.T) {
 			wantAnnotations: map[string]string{},
 			wantViolations:  []ViolationRecord{},
 			wantAcknowledged: func() []AcknowledgedViolationRecord {
-				r := make([]AcknowledgedViolationRecord, MaxViolationRecords+1)
+				r := make([]AcknowledgedViolationRecord, maxViolationRecords+1)
 				for i := range r {
 					r[i] = newAck(int64(i), "acknowledged", now)
 				}
-				r[MaxViolationRecords] = newAck(101, "acknowledged", now)
+				r[maxViolationRecords] = newAck(101, "acknowledged", now)
 				slices.SortFunc(r, func(a, b AcknowledgedViolationRecord) int {
 					return b.AcknowledgedAt.Time.Compare(a.AcknowledgedAt.Time)
 				})
-				return r[:MaxViolationRecords]
+				return r[:maxViolationRecords]
 			}(),
 			wantReturned: []AcknowledgedViolationRecord{
 				newAck(101, "acknowledged", now),

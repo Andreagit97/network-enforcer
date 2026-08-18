@@ -11,9 +11,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
-// MaxViolationRecords is the maximum number of ViolationRecords and
+// maxViolationRecords is the maximum number of ViolationRecords and
 // AcknowledgedViolationRecords kept in status.
-const MaxViolationRecords = 100
+const maxViolationRecords = 100
 
 // annotationInfo groups an annotation key with its acknowledge-reason pair.
 type annotationInfo struct {
@@ -321,8 +321,8 @@ func (s *WorkloadNetworkPolicyStatus) mergeScrapedViolations(scraped []Violation
 		return b.Timestamp.Time.Compare(a.Timestamp.Time)
 	})
 
-	if len(s.Violations) > MaxViolationRecords {
-		s.Violations = s.Violations[:MaxViolationRecords]
+	if len(s.Violations) > maxViolationRecords {
+		s.Violations = s.Violations[:maxViolationRecords]
 	}
 }
 
@@ -385,8 +385,8 @@ func (wnp *WorkloadNetworkPolicy) acknowledgeViolationsFromAnnotations(now metav
 		return b.AcknowledgedAt.Time.Compare(a.AcknowledgedAt.Time)
 	})
 
-	if len(wnp.Status.AcknowledgedViolations) > MaxViolationRecords {
-		wnp.Status.AcknowledgedViolations = wnp.Status.AcknowledgedViolations[:MaxViolationRecords]
+	if len(wnp.Status.AcknowledgedViolations) > maxViolationRecords {
+		wnp.Status.AcknowledgedViolations = wnp.Status.AcknowledgedViolations[:maxViolationRecords]
 	}
 
 	wnp.SetAnnotations(annotations)
