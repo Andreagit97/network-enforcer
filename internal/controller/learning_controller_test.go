@@ -31,22 +31,26 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 	clientPrincipal := "cluster.local/ns/default/sa/http-client-sa"
 	otherPrincipal := "cluster.local/ns/default/sa/other-client-sa"
 	httpServerName := "http-server"
+	httpServerRef := &securityv1alpha1.WorkloadRef{
+		Namespace: testNamespace,
+		OwnerKind: securityv1alpha1.WorkloadKindDeployment,
+		OwnerName: httpServerName,
+		Selector:  metav1.LabelSelector{MatchLabels: map[string]string{"app": httpServerName}},
+	}
+	backendRef := &securityv1alpha1.WorkloadRef{
+		Namespace: testNamespace,
+		OwnerKind: securityv1alpha1.WorkloadKindDeployment,
+		OwnerName: "backend",
+		Selector:  metav1.LabelSelector{MatchLabels: map[string]string{"app": "backend"}},
+	}
 	httpServerHash := "6cbcc86f5d"
 	httpServerRS := httpServerName + "-" + httpServerHash
 	httpServerPodA := httpServerRS + "-aaa"
 	httpServerPodB := httpServerRS + "-bbb"
 	httpServerLabels := map[string]string{"app": httpServerName}
 
-	httpServerProposal := getProposalName(securityv1alpha1.WorkloadRef{
-		Namespace: testNamespace,
-		OwnerKind: securityv1alpha1.WorkloadKindDeployment,
-		OwnerName: httpServerName,
-	}, networkingv1.PolicyTypeIngress)
-	backendProposal := getProposalName(securityv1alpha1.WorkloadRef{
-		Namespace: testNamespace,
-		OwnerKind: securityv1alpha1.WorkloadKindDeployment,
-		OwnerName: "backend",
-	}, networkingv1.PolicyTypeIngress)
+	httpServerProposal := getProposalName(httpServerRef, networkingv1.PolicyTypeIngress)
+	backendProposal := getProposalName(backendRef, networkingv1.PolicyTypeIngress)
 	promotedWNP := newTestWNP(backendProposal, testNamespace)
 	promotedWNP.Labels = map[string]string{
 		securityv1alpha1.PolicyPromotedFromLabelKey: backendProposal,
@@ -80,11 +84,11 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 				}),
 			},
 			events: []netypes.LearningEvent{{
-				Dest:    &securityv1alpha1.WorkloadRef{Namespace: testNamespace, OwnerName: httpServerPodA},
+				Dest:    httpServerRef,
 				Source:  &securityv1alpha1.WorkloadRef{Identity: clientPrincipal},
 				DstPort: "18080",
 			}, {
-				Dest:    &securityv1alpha1.WorkloadRef{Namespace: testNamespace, OwnerName: httpServerPodB},
+				Dest:    httpServerRef,
 				Source:  &securityv1alpha1.WorkloadRef{Identity: clientPrincipal},
 				DstPort: "18080",
 			}},
@@ -119,22 +123,22 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 			},
 			events: []netypes.LearningEvent{
 				{
-					Dest:    &securityv1alpha1.WorkloadRef{Namespace: testNamespace, OwnerName: httpServerPodA},
+					Dest:    httpServerRef,
 					Source:  &securityv1alpha1.WorkloadRef{Identity: clientPrincipal},
 					DstPort: "18080",
 				},
 				{
-					Dest:    &securityv1alpha1.WorkloadRef{Namespace: testNamespace, OwnerName: httpServerPodA},
+					Dest:    httpServerRef,
 					Source:  &securityv1alpha1.WorkloadRef{Identity: clientPrincipal},
 					DstPort: "18081",
 				},
 				{
-					Dest:    &securityv1alpha1.WorkloadRef{Namespace: testNamespace, OwnerName: httpServerPodA},
+					Dest:    httpServerRef,
 					Source:  &securityv1alpha1.WorkloadRef{Identity: clientPrincipal},
 					DstPort: "18080",
 				},
 				{
-					Dest:    &securityv1alpha1.WorkloadRef{Namespace: testNamespace, OwnerName: httpServerPodA},
+					Dest:    httpServerRef,
 					Source:  &securityv1alpha1.WorkloadRef{Identity: otherPrincipal},
 					DstPort: "18080",
 				},
@@ -208,7 +212,7 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 				},
 			},
 			events: []netypes.LearningEvent{{
-				Dest:    &securityv1alpha1.WorkloadRef{Namespace: testNamespace, OwnerName: httpServerPodA},
+				Dest:    httpServerRef,
 				Source:  &securityv1alpha1.WorkloadRef{Identity: clientPrincipal},
 				DstPort: "18081",
 			}},
@@ -244,25 +248,7 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 				promotedWNP,
 			},
 			events: []netypes.LearningEvent{{
-				Dest:    &securityv1alpha1.WorkloadRef{Namespace: testNamespace, OwnerName: "backend-7d9f8c6b5a-pod"},
-				Source:  &securityv1alpha1.WorkloadRef{Identity: clientPrincipal},
-				DstPort: "8080",
-			}},
-			wantProposalLen: 0,
-		},
-		{
-			name: "unsupported owner skipped",
-			objs: []client.Object{
-				ownedPod("oneshot-pod", &metav1.OwnerReference{
-					APIVersion: "batch/v1",
-					Kind:       "Job",
-					Name:       "oneshot",
-					UID:        "job-uid",
-					Controller: new(true),
-				}, nil),
-			},
-			events: []netypes.LearningEvent{{
-				Dest:    &securityv1alpha1.WorkloadRef{Namespace: testNamespace, OwnerName: "oneshot-pod"},
+				Dest:    backendRef,
 				Source:  &securityv1alpha1.WorkloadRef{Identity: clientPrincipal},
 				DstPort: "8080",
 			}},

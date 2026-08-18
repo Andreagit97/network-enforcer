@@ -154,6 +154,12 @@ func TestWorkloadKeyFromPod(t *testing.T) {
 		controllerRef("apps/v1", string(securityv1alpha1.WorkloadKindReplicaSet), "frontend-abc123"),
 		map[string]string{appsv1.DefaultDeploymentUniqueLabelKey: "abc123"},
 	)
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "frontend", Namespace: testNamespace},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "frontend"}},
+		},
+	}
 
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
@@ -161,17 +167,19 @@ func TestWorkloadKeyFromPod(t *testing.T) {
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(pod).
+		WithObjects(pod, deployment).
 		Build()
 
-	got, err := Get(context.Background(), cl, testNamespace, pod.Name)
+	got, err := Get(context.Background(), cl, types.NamespacedName{Namespace: testNamespace, Name: pod.Name})
 	require.NoError(t, err)
 	require.Equal(t, securityv1alpha1.WorkloadRef{
 		Namespace: testNamespace,
 		OwnerKind: securityv1alpha1.WorkloadKindDeployment,
 		OwnerName: "frontend",
+		Identity:  "cluster.local/ns/default/sa/default",
+		Selector:  metav1.LabelSelector{MatchLabels: map[string]string{"app": "frontend"}},
 	}, got)
 
-	_, err = Get(context.Background(), cl, testNamespace, "missing")
+	_, err = Get(context.Background(), cl, types.NamespacedName{Namespace: testNamespace, Name: "missing"})
 	require.True(t, apierrors.IsNotFound(err))
 }

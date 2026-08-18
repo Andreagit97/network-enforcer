@@ -17,14 +17,17 @@ import (
 func Get(
 	ctx context.Context,
 	c client.Client,
-	namespace, podName string,
+	podNamespacedName types.NamespacedName,
 ) (securityv1alpha1.WorkloadRef, error) {
 	var pod corev1.Pod
-	if err := c.Get(ctx, types.NamespacedName{Name: podName, Namespace: namespace}, &pod); err != nil {
-		return securityv1alpha1.WorkloadRef{}, fmt.Errorf("getting Pod %s/%s: %w", namespace, podName, err)
+	if err := c.Get(ctx, podNamespacedName, &pod); err != nil {
+		return securityv1alpha1.WorkloadRef{}, fmt.Errorf("getting Pod %q: %w", podNamespacedName, err)
 	}
 	ref := GetNameAndKind(&pod)
 	ref.SetIdentity(pod.Spec.ServiceAccountName)
+	if !ref.IsSupported() {
+		return ref, nil
+	}
 	labelSelector, err := lookupPodSelectorForWorkload(ctx, c, &ref)
 	if err != nil {
 		return securityv1alpha1.WorkloadRef{}, fmt.Errorf(

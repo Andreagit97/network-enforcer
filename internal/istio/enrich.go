@@ -258,3 +258,10 @@ func workloadRefFromPod(pod *corev1.Pod) securityv1alpha1.WorkloadRef {
 	wk.SetIdentity(pod.Spec.ServiceAccountName)
 	return wk
 }
+
+func (e *Enricher) GetWorkloadRef(
+	ctx context.Context,
+	podNamespacedName types.NamespacedName,
+) (securityv1alpha1.WorkloadRef, error) {
+	return workload.Get(ctx, e.client, podNamespacedName)
+}

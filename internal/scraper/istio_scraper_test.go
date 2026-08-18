@@ -35,19 +35,6 @@ func (f *fakeOtelEventLogger) Emit(_ context.Context, rec otellog.Record) {
 	f.emitted = append(f.emitted, rec.Clone())
 }
 
-func testScraper(
-	enqueue LearningEnqueueFunc,
-	buffer *violation.Buffer,
-	logger otellog.Logger,
-) *IstioScraper {
-	return NewIstioScraper(IstioScraperConfig{
-		ViolationBuffer:      buffer,
-		EnqueueLearningEvent: enqueue,
-		ViolationOtelLogger:  logger,
-		Logger:               slog.New(slog.DiscardHandler),
-	})
-}
-
 // otlpRequest wraps the given log records into an ExportLogsServiceRequest.
 func otlpRequest(records ...*logspb.LogRecord) *collogspb.ExportLogsServiceRequest {
 	return &collogspb.ExportLogsServiceRequest{
@@ -105,7 +92,12 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 			wantLearned: &types.LearningEvent{
 				Dest: &securityv1alpha1.WorkloadRef{
 					Namespace: "default",
-					OwnerName: "http-server-7bbf596dd9-4rgdc",
+					OwnerKind: securityv1alpha1.WorkloadKindDeployment,
+					OwnerName: "http-server",
+					Identity:  "cluster.local/ns/default/sa/default",
+					Selector: metav1.LabelSelector{MatchLabels: map[string]string{
+						"app": "http-server",
+					}},
 				},
 				Source: &securityv1alpha1.WorkloadRef{
 					Identity: "cluster.local/ns/default/sa/http-client-sa",
@@ -194,6 +186,39 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 		},
 	}
 
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, securityv1alpha1.AddToScheme(scheme))
+	learnDstPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "http-server-7bbf596dd9-4rgdc",
+			Namespace: "default",
+			Labels: map[string]string{
+				appsv1.DefaultDeploymentUniqueLabelKey: "7bbf596dd9",
+				"app":                                  "http-server",
+			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: appsv1.SchemeGroupVersion.String(),
+				Kind:       string(securityv1alpha1.WorkloadKindReplicaSet),
+				Name:       "http-server-7bbf596dd9",
+				UID:        "http-server-rs-uid",
+				Controller: new(true),
+			}},
+		},
+	}
+	learnDstDeploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "http-server", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "http-server"}},
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithIndex(&corev1.Pod{}, istio.PodIPIndexField, istio.IndexPodByIP).
+		WithObjects(learnDstPod, learnDstDeploy).
+		Build()
+
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -202,14 +227,16 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 			buffer := violation.NewBuffer()
 			otelLogger := &fakeOtelEventLogger{}
 
-			scraper := testScraper(
-				func(ev types.LearningEvent) bool {
+			scraper := NewIstioScraper(IstioScraperConfig{
+				EnqueueLearningEvent: func(ev types.LearningEvent) bool {
 					learned = append(learned, ev)
 					return true
 				},
-				buffer,
-				otelLogger,
-			)
+				ViolationBuffer:     buffer,
+				ViolationOtelLogger: otelLogger,
+				Logger:              slog.New(slog.DiscardHandler),
+				Enricher:            istio.NewEnricher(cl),
+			})
 
 			_, err := scraper.Export(context.Background(), otlpRequest(otlpRecord(tc.attrs, unixNano)))
 			require.NoError(t, err)

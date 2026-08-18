@@ -8,7 +8,6 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
-	"github.com/rancher-sandbox/network-enforcer/internal/workload"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/workqueue"
@@ -66,22 +65,17 @@ func (r *LearningReconciler) enqueueEvent(evt types.LearningEvent) bool {
 
 func (r *LearningReconciler) updateProposal(
 	ctx context.Context,
-	wk securityv1alpha1.WorkloadRef,
 	evt types.LearningEvent,
 ) error {
 	// Istio Ambient L4 authorization is enforced on the receiving side,
 	// so learning always targets the ingress proposal.
-	proposal := getProposalMetadata(wk, networkingv1.PolicyTypeIngress)
+	proposal := getProposalMetadata(evt.Dest, networkingv1.PolicyTypeIngress)
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, proposal, func() error {
 		// Populate the Istio backend only when creating the resource the first time.
 		if proposal.Spec.Istio == nil {
-			workloadSelector, err := lookupPodSelectorForWorkload(ctx, r.Client, wk)
-			if err != nil {
-				return fmt.Errorf("resolving workload selector: %w", err)
-			}
 			proposal.Spec.Backend = securityv1alpha1.PolicyBackendIstio
 			proposal.Spec.Istio = &securityv1alpha1.IstioAuthorizationPolicySpec{
-				Selector: workloadSelector,
+				Selector: evt.Dest.Selector,
 			}
 		}
 
@@ -139,16 +133,9 @@ func upsertIstioLearnedRule(
 }
 
 func (r *LearningReconciler) processIstioLearningEvent(ctx context.Context, req types.LearningEvent) error {
-	// For istio proposals are inbound, so we always need to search for inbound proposal for
+	// For istio proposals are inbound, so we always need to create an inbound proposal for
 	// the destination.
-	wk, err := workload.Get(ctx, r.Client, req.Dest.Namespace, req.Dest.OwnerName)
-	if err != nil {
-		return fmt.Errorf("resolving destination workload for %s/%s: %w", req.Dest.Namespace, req.Dest.OwnerName, err)
-	}
-	if !wk.IsSupported() {
-		return nil
-	}
-
+	wk := req.Dest
 	proposalName := getProposalName(wk, networkingv1.PolicyTypeIngress)
 	policies, err := checkExistingPolicy(ctx, r.Client, wk.Namespace, proposalName)
 	if err != nil {
@@ -158,7 +145,7 @@ func (r *LearningReconciler) processIstioLearningEvent(ctx context.Context, req 
 	switch len(policies) {
 	case 0:
 		// no policy associated with the proposal
-		return r.updateProposal(ctx, wk, req)
+		return r.updateProposal(ctx, req)
 	case 1:
 		// we do nothing, we already have a policy
 		return nil
