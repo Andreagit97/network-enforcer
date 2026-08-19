@@ -7,8 +7,6 @@ import (
 	"slices"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
-	"github.com/rancher-sandbox/network-enforcer/internal/ownerkind"
-	"github.com/rancher-sandbox/network-enforcer/internal/topology"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -67,26 +65,21 @@ func (r *LearningReconciler) enqueueEvent(evt types.LearningEvent) bool {
 
 func (r *LearningReconciler) updateProposal(
 	ctx context.Context,
-	workload topology.WorkloadKey,
 	evt types.LearningEvent,
 ) error {
 	// Istio Ambient L4 authorization is enforced on the receiving side,
 	// so learning always targets the ingress proposal.
-	proposal := getProposalMetadata(workload, networkingv1.PolicyTypeIngress)
+	proposal := getProposalMetadata(evt.Dest, networkingv1.PolicyTypeIngress)
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, proposal, func() error {
 		// Populate the Istio backend only when creating the resource the first time.
 		if proposal.Spec.Istio == nil {
-			workloadSelector, err := lookupPodSelectorForWorkload(ctx, r.Client, workload)
-			if err != nil {
-				return fmt.Errorf("resolving workload selector: %w", err)
-			}
 			proposal.Spec.Backend = securityv1alpha1.PolicyBackendIstio
 			proposal.Spec.Istio = &securityv1alpha1.IstioAuthorizationPolicySpec{
-				Selector: workloadSelector,
+				Selector: evt.Dest.Selector,
 			}
 		}
 
-		upsertIstioLearnedRule(proposal.Spec.Istio, evt.SrcIdentity, evt.DstPort)
+		upsertIstioLearnedRule(proposal.Spec.Istio, evt.Source.Identity, evt.DstPort)
 		return nil
 	}); err != nil {
 		return fmt.Errorf("create or update proposal %s/%s: %w", proposal.Namespace, proposal.Name, err)
@@ -140,26 +133,19 @@ func upsertIstioLearnedRule(
 }
 
 func (r *LearningReconciler) processIstioLearningEvent(ctx context.Context, req types.LearningEvent) error {
-	// For istio proposals are inbound, so we always need to search for inbound proposal for
+	// For istio proposals are inbound, so we always need to create an inbound proposal for
 	// the destination.
-	workload, err := topology.WorkloadKeyFromPod(ctx, r.Client, req.DstNamespace, req.DstName)
+	wk := req.Dest
+	proposalName := getProposalName(wk, networkingv1.PolicyTypeIngress)
+	policies, err := checkExistingPolicy(ctx, r.Client, wk.Namespace, proposalName)
 	if err != nil {
-		return fmt.Errorf("resolving destination workload for %s/%s: %w", req.DstNamespace, req.DstName, err)
-	}
-	if _, ok := ownerkind.IsValidEndpoint(string(workload.OwnerKind)); !ok {
-		return nil
-	}
-
-	proposalName := getProposalName(workload, networkingv1.PolicyTypeIngress)
-	policies, err := checkExistingPolicy(ctx, r.Client, workload.Namespace, proposalName)
-	if err != nil {
-		return fmt.Errorf("checking existing policies for %s/%s: %w", workload.Namespace, proposalName, err)
+		return fmt.Errorf("checking existing policies for %s/%s: %w", wk.Namespace, proposalName, err)
 	}
 
 	switch len(policies) {
 	case 0:
 		// no policy associated with the proposal
-		return r.updateProposal(ctx, workload, req)
+		return r.updateProposal(ctx, req)
 	case 1:
 		// we do nothing, we already have a policy
 		return nil

@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
 const gracefulGRPCTimeout = 5 * time.Second
@@ -158,16 +159,16 @@ func (s *IstioScraper) Export(
 
 // enqueueLearningEvent feeds a `learn` record into the learning pipeline.
 func (s *IstioScraper) enqueueLearningEvent(ctx context.Context, attrs map[string]string) {
-	dstName := attrs[dstNameKey]
+	dstPodName := attrs[dstNameKey]
 	dstNamespace := attrs[dstNamespaceKey]
 	dstPort := attrs[dstPortKey]
 	// Strip the `spiffe://` scheme as soon as we ingest the identity: the
 	// canonical principal form (Istio convention and our stored
 	// WorkloadRef.Identity) carries no prefix.
 	srcIdentity, hasSPIFFEPrefix := strings.CutPrefix(attrs[srcIdentityKey], spiffeURIPrefix)
-	if dstName == "" || dstNamespace == "" || dstPort == "" || !hasSPIFFEPrefix || srcIdentity == "" {
+	if dstPodName == "" || dstNamespace == "" || dstPort == "" || !hasSPIFFEPrefix || srcIdentity == "" {
 		s.Logger.WarnContext(ctx, "Skipping learning event with missing required fields",
-			dstNameKey, dstName,
+			dstNameKey, dstPodName,
 			dstNamespaceKey, dstNamespace,
 			dstPortKey, dstPort,
 			srcIdentityKey, attrs[srcIdentityKey],
@@ -175,12 +176,37 @@ func (s *IstioScraper) enqueueLearningEvent(ctx context.Context, attrs map[strin
 		)
 		return
 	}
-	if !s.EnqueueLearningEvent(types.LearningEvent{
-		DstName:      dstName,
-		DstNamespace: dstNamespace,
-		DstPort:      dstPort,
-		SrcIdentity:  srcIdentity,
-	}) {
+
+	if s.Enricher == nil {
+		s.Logger.ErrorContext(ctx, "cannot send learning events without enricher")
+		return
+	}
+
+	dstWorkloadRef, err := s.Enricher.GetWorkloadRef(ctx,
+		k8stypes.NamespacedName{Namespace: dstNamespace, Name: dstPodName})
+	if err != nil {
+		s.Logger.WarnContext(ctx, "Failed to get destination workload reference", "error", err)
+		return
+	}
+
+	// If the destination type is not supported we don't even send the event to the channel
+	if !dstWorkloadRef.IsSupported() {
+		s.Logger.DebugContext(ctx,
+			"Skipping learning event with unsupported destination workload",
+			"dstWorkloadRef", dstWorkloadRef,
+		)
+		return
+	}
+
+	// Generate Istio Learning Event:
+	// - for the source, the identity is enough, we don't need the workload name or labels.
+	// - for the destination, we need the workload name and labels but not the identity.
+	learningEvent := types.LearningEvent{
+		Source:  &securityv1alpha1.WorkloadRef{Identity: srcIdentity},
+		Dest:    &dstWorkloadRef,
+		DstPort: dstPort,
+	}
+	if !s.EnqueueLearningEvent(learningEvent) {
 		// todo!: we can consider some rate limiting here
 		s.Logger.WarnContext(ctx, "Failed to enqueue learning event, channel is full")
 	}

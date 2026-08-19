@@ -1,9 +1,10 @@
-package topology
+package workload
 
 import (
 	"context"
 	"testing"
 
+	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -12,21 +13,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
-	"github.com/rancher-sandbox/network-enforcer/internal/ownerkind"
 )
 
 const testNamespace = "default"
-
-func newWorkloadTestScheme(t *testing.T) *runtime.Scheme {
-	t.Helper()
-	scheme := runtime.NewScheme()
-	require.NoError(t, corev1.AddToScheme(scheme))
-	require.NoError(t, appsv1.AddToScheme(scheme))
-	require.NoError(t, securityv1alpha1.AddToScheme(scheme))
-	return scheme
-}
 
 func ownedPod(name string, owner *metav1.OwnerReference, labels map[string]string) *corev1.Pod {
 	pod := &corev1.Pod{
@@ -61,14 +50,14 @@ func TestExtractWorkloadKey(t *testing.T) {
 	tests := []struct {
 		name string
 		pod  *corev1.Pod
-		want WorkloadKey
+		want securityv1alpha1.WorkloadRef
 	}{
 		{
 			name: "standalone pod without controller",
 			pod:  ownedPod("mypod", nil, nil),
-			want: WorkloadKey{
+			want: securityv1alpha1.WorkloadRef{
 				Namespace: testNamespace,
-				OwnerKind: ownerkind.KindPod,
+				OwnerKind: securityv1alpha1.WorkloadKindPod,
 				OwnerName: "mypod",
 			},
 		},
@@ -78,14 +67,14 @@ func TestExtractWorkloadKey(t *testing.T) {
 				"runtime-enforcer-controller-manager-6f4b9855c6-5zwq7",
 				controllerRef(
 					"apps/v1",
-					string(ownerkind.KindReplicaSet),
+					string(securityv1alpha1.WorkloadKindReplicaSet),
 					"runtime-enforcer-controller-manager-6f4b9855c6",
 				),
 				map[string]string{},
 			),
-			want: WorkloadKey{
+			want: securityv1alpha1.WorkloadRef{
 				Namespace: testNamespace,
-				OwnerKind: ownerkind.KindReplicaSet,
+				OwnerKind: securityv1alpha1.WorkloadKindReplicaSet,
 				OwnerName: "runtime-enforcer-controller-manager-6f4b9855c6",
 			},
 		},
@@ -95,16 +84,16 @@ func TestExtractWorkloadKey(t *testing.T) {
 				"runtime-enforcer-controller-manager-6f4b9855c6-5zwq7",
 				controllerRef(
 					"apps/v1",
-					string(ownerkind.KindReplicaSet),
+					string(securityv1alpha1.WorkloadKindReplicaSet),
 					"runtime-enforcer-controller-manager-6f4b9855c6",
 				),
 				map[string]string{
 					appsv1.DefaultDeploymentUniqueLabelKey: "6f4b9855c6",
 				},
 			),
-			want: WorkloadKey{
+			want: securityv1alpha1.WorkloadRef{
 				Namespace: testNamespace,
-				OwnerKind: ownerkind.KindDeployment,
+				OwnerKind: securityv1alpha1.WorkloadKindDeployment,
 				OwnerName: "runtime-enforcer-controller-manager",
 			},
 		},
@@ -112,12 +101,12 @@ func TestExtractWorkloadKey(t *testing.T) {
 			name: "statefulset",
 			pod: ownedPod(
 				"db-0",
-				controllerRef("apps/v1", string(ownerkind.KindStatefulSet), "db"),
+				controllerRef("apps/v1", string(securityv1alpha1.WorkloadKindStatefulSet), "db"),
 				nil,
 			),
-			want: WorkloadKey{
+			want: securityv1alpha1.WorkloadRef{
 				Namespace: testNamespace,
-				OwnerKind: ownerkind.KindStatefulSet,
+				OwnerKind: securityv1alpha1.WorkloadKindStatefulSet,
 				OwnerName: "db",
 			},
 		},
@@ -125,12 +114,12 @@ func TestExtractWorkloadKey(t *testing.T) {
 			name: "daemonset",
 			pod: ownedPod(
 				"agent-node1",
-				controllerRef("apps/v1", string(ownerkind.KindDaemonSet), "agent"),
+				controllerRef("apps/v1", string(securityv1alpha1.WorkloadKindDaemonSet), "agent"),
 				nil,
 			),
-			want: WorkloadKey{
+			want: securityv1alpha1.WorkloadRef{
 				Namespace: testNamespace,
-				OwnerKind: ownerkind.KindDaemonSet,
+				OwnerKind: securityv1alpha1.WorkloadKindDaemonSet,
 				OwnerName: "agent",
 			},
 		},
@@ -141,9 +130,9 @@ func TestExtractWorkloadKey(t *testing.T) {
 				controllerRef("batch/v1", "Job", "ubuntu-job"),
 				nil,
 			),
-			want: WorkloadKey{
+			want: securityv1alpha1.WorkloadRef{
 				Namespace: testNamespace,
-				OwnerKind: ownerkind.Kind("Job"),
+				OwnerKind: securityv1alpha1.WorkloadKindJob,
 				OwnerName: "ubuntu-job",
 			},
 		},
@@ -152,7 +141,7 @@ func TestExtractWorkloadKey(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			require.Equal(t, tt.want, ExtractWorkloadKey(tt.pod))
+			require.Equal(t, tt.want, GetNameAndKind(tt.pod))
 		})
 	}
 }
@@ -162,23 +151,35 @@ func TestWorkloadKeyFromPod(t *testing.T) {
 
 	pod := ownedPod(
 		"frontend-abc123-xyz",
-		controllerRef("apps/v1", string(ownerkind.KindReplicaSet), "frontend-abc123"),
+		controllerRef("apps/v1", string(securityv1alpha1.WorkloadKindReplicaSet), "frontend-abc123"),
 		map[string]string{appsv1.DefaultDeploymentUniqueLabelKey: "abc123"},
 	)
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "frontend", Namespace: testNamespace},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "frontend"}},
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	require.NoError(t, appsv1.AddToScheme(scheme))
 
 	cl := fake.NewClientBuilder().
-		WithScheme(newWorkloadTestScheme(t)).
-		WithObjects(pod).
+		WithScheme(scheme).
+		WithObjects(pod, deployment).
 		Build()
 
-	got, err := WorkloadKeyFromPod(context.Background(), cl, testNamespace, pod.Name)
+	got, err := Get(context.Background(), cl, types.NamespacedName{Namespace: testNamespace, Name: pod.Name})
 	require.NoError(t, err)
-	require.Equal(t, WorkloadKey{
+	require.Equal(t, securityv1alpha1.WorkloadRef{
 		Namespace: testNamespace,
-		OwnerKind: ownerkind.KindDeployment,
+		OwnerKind: securityv1alpha1.WorkloadKindDeployment,
 		OwnerName: "frontend",
+		Identity:  "", // identity is not populated by this method
+		Selector:  metav1.LabelSelector{MatchLabels: map[string]string{"app": "frontend"}},
 	}, got)
 
-	_, err = WorkloadKeyFromPod(context.Background(), cl, testNamespace, "missing")
+	_, err = Get(context.Background(), cl, types.NamespacedName{Namespace: testNamespace, Name: "missing"})
 	require.True(t, apierrors.IsNotFound(err))
 }

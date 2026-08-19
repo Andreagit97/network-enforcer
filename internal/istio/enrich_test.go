@@ -21,7 +21,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
-	"github.com/rancher-sandbox/network-enforcer/internal/ownerkind"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 )
 
@@ -103,7 +102,7 @@ func deploymentPod(deployName, namespace, ip, serviceAccount string) *corev1.Pod
 	const hash = "abc123"
 	rsName := deployName + "-" + hash
 	pod := sourcePod(rsName+"-pod", namespace, ip, serviceAccount,
-		controllerRef(appsv1.SchemeGroupVersion.String(), string(ownerkind.KindReplicaSet), rsName))
+		controllerRef(appsv1.SchemeGroupVersion.String(), string(securityv1alpha1.WorkloadKindReplicaSet), rsName))
 	pod.Labels = map[string]string{appsv1.DefaultDeploymentUniqueLabelKey: hash}
 	return pod
 }
@@ -175,7 +174,7 @@ func TestResolveSourceWorkload(t *testing.T) {
 			},
 			wantSource: securityv1alpha1.WorkloadRef{
 				Namespace: "team-a",
-				OwnerKind: "Deployment",
+				OwnerKind: securityv1alpha1.WorkloadKindDeployment,
 				OwnerName: "myapp",
 				Identity:  "cluster.local/ns/team-a/sa/myapp-sa",
 			},
@@ -192,7 +191,7 @@ func TestResolveSourceWorkload(t *testing.T) {
 			},
 			wantSource: securityv1alpha1.WorkloadRef{
 				Namespace: "team-b",
-				OwnerKind: "Pod",
+				OwnerKind: securityv1alpha1.WorkloadKindPod,
 				OwnerName: "lonely",
 				Identity:  "cluster.local/ns/team-b/sa/default",
 			},

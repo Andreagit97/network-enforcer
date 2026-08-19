@@ -21,27 +21,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
-	"github.com/rancher-sandbox/network-enforcer/internal/topology"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
+	"github.com/rancher-sandbox/network-enforcer/internal/workload"
 )
-
-// istioTrustDomain is the SPIFFE trust domain assumed for source identities
-// resolved from pod state. Istio's default trust domain is cluster.local; the
-// canonical, prefix-free principal form consumed by istioRuleAllowsSource is
-// `<trustDomain>/ns/<namespace>/sa/<serviceAccount>`.
-//
-// LIMITATION: this is fixed to the Istio default. The protect/monitor events
-// carry only the peer address (not src.identity), so the identity is
-// reconstructed here rather than reported. In a mesh configured with a custom
-// trust domain, the reconstructed identity will not equal the learned rule
-// principals, so these violations will not be cleared by istioRuleAllowsSource.
-// Making this configurable (or plumbing the real src.identity through the
-// protect/monitor OTLP events) is left for follow-up.
-const istioTrustDomain = "cluster.local"
-
-// defaultServiceAccountName is the service account a pod runs as when none is
-// set explicitly, used to reconstruct its SPIFFE identity.
-const defaultServiceAccountName = "default"
 
 // Enricher resolves the source and destination workloads of an Istio violation
 // from live pod state, using a status.podIP field index registered via
@@ -233,15 +215,6 @@ func peerIPFromAddr(addr string) (string, error) {
 	return host, nil
 }
 
-// spiffeIdentity builds the prefix-free Istio principal form for a pod's
-// service account. Pods with no explicit service account run as `default`.
-func spiffeIdentity(namespace, serviceAccount string) string {
-	if serviceAccount == "" {
-		serviceAccount = defaultServiceAccountName
-	}
-	return fmt.Sprintf("%s/ns/%s/sa/%s", istioTrustDomain, namespace, serviceAccount)
-}
-
 // resolveSourceWorkload resolves the client (source) workload of an Istio
 // violation from its peer address. Istio emits these events on the destination
 // ztunnel and identifies the client only by `ip:port`, so the source is
@@ -293,11 +266,14 @@ func (e *Enricher) resolveSourceWorkload(
 // destination), including its Istio SPIFFE identity so it can drive rule
 // clearing.
 func workloadRefFromPod(pod *corev1.Pod) securityv1alpha1.WorkloadRef {
-	wk := topology.ExtractWorkloadKey(pod)
-	return securityv1alpha1.WorkloadRef{
-		Namespace: wk.Namespace,
-		OwnerKind: string(wk.OwnerKind),
-		OwnerName: wk.OwnerName,
-		Identity:  spiffeIdentity(pod.Namespace, pod.Spec.ServiceAccountName),
-	}
+	wk := workload.GetNameAndKind(pod)
+	wk.SetIdentity(pod.Spec.ServiceAccountName)
+	return wk
+}
+
+func (e *Enricher) GetWorkloadRef(
+	ctx context.Context,
+	podNamespacedName types.NamespacedName,
+) (securityv1alpha1.WorkloadRef, error) {
+	return workload.Get(ctx, e.client, podNamespacedName)
 }
