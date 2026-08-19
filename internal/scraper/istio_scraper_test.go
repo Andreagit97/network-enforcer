@@ -101,7 +101,9 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 				Source: &securityv1alpha1.WorkloadRef{
 					Identity: "cluster.local/ns/default/sa/http-client-sa",
 				},
-				DstPort: "18080",
+				DstPort:  18080,
+				Backend:  securityv1alpha1.PolicyBackendIstio,
+				Protocol: corev1.ProtocolTCP,
 			},
 		},
 		{

@@ -2,6 +2,7 @@ package workload
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -27,8 +28,7 @@ func Get(
 	if !ref.IsSupported() {
 		return ref, nil
 	}
-	labelSelector, err := lookupPodSelectorForWorkload(ctx, c, &ref)
-	if err != nil {
+	if err := LookupPodSelectorForWorkload(ctx, c, &ref); err != nil {
 		return securityv1alpha1.WorkloadRef{}, fmt.Errorf(
 			"failed to lookup %s %s/%s label selector: %w",
 			ref.OwnerKind,
@@ -37,15 +37,6 @@ func Get(
 			err,
 		)
 	}
-	if labelSelector == nil {
-		return securityv1alpha1.WorkloadRef{}, fmt.Errorf(
-			"empty label selector for %s %s/%s",
-			ref.OwnerKind,
-			ref.Namespace,
-			ref.OwnerName,
-		)
-	}
-	ref.Selector = *labelSelector
 	return ref, nil
 }
 
@@ -89,32 +80,47 @@ func GetNameAndKind(pod *corev1.Pod) securityv1alpha1.WorkloadRef {
 	}
 }
 
-func lookupPodSelectorForWorkload(
+func LookupPodSelectorForWorkload(
 	ctx context.Context,
 	c client.Client,
 	wk *securityv1alpha1.WorkloadRef,
-) (*metav1.LabelSelector, error) {
+) error {
 	key := types.NamespacedName{Name: wk.OwnerName, Namespace: wk.Namespace}
+	var selector *metav1.LabelSelector
 	switch wk.OwnerKind { //nolint:exhaustive // we don't support all workload kinds
 	case securityv1alpha1.WorkloadKindDeployment:
 		var deploy appsv1.Deployment
 		if err := c.Get(ctx, key, &deploy); err != nil {
-			return nil, err
+			return err
 		}
-		return deploy.Spec.Selector, nil
+		selector = deploy.Spec.Selector
 	case securityv1alpha1.WorkloadKindStatefulSet:
 		var sts appsv1.StatefulSet
 		if err := c.Get(ctx, key, &sts); err != nil {
-			return nil, err
+			return err
 		}
-		return sts.Spec.Selector, nil
+		selector = sts.Spec.Selector
 	case securityv1alpha1.WorkloadKindDaemonSet:
 		var ds appsv1.DaemonSet
 		if err := c.Get(ctx, key, &ds); err != nil {
-			return nil, err
+			return err
 		}
-		return ds.Spec.Selector, nil
+		selector = ds.Spec.Selector
 	default:
-		return nil, fmt.Errorf("unsupported workload kind: %s", string(wk.OwnerKind))
+		return fmt.Errorf("unsupported workload kind: %s", string(wk.OwnerKind))
 	}
+
+	if selector == nil {
+		return errors.New("nil label selector not allowed")
+	}
+
+	s, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil {
+		return fmt.Errorf("failed to convert label selector: %w", err)
+	}
+	if s.Empty() {
+		return errors.New("empty selector not allowed")
+	}
+	wk.Selector = *selector
+	return nil
 }
