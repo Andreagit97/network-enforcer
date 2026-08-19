@@ -111,7 +111,15 @@ func LookupPodSelectorForWorkload(
 	}
 
 	if selector == nil {
-		return errors.New("empty label selector")
+		return errors.New("nil label selector not allowed")
+	}
+
+	s, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil {
+		return fmt.Errorf("failed to convert label selector: %w", err)
+	}
+	if s.Empty() {
+		return errors.New("empty selector not allowed")
 	}
 	wk.Selector = *selector
 	return nil
