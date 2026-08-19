@@ -86,11 +86,11 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 			events: []netypes.LearningEvent{{
 				Dest:    httpServerRef,
 				Source:  &securityv1alpha1.WorkloadRef{Identity: clientPrincipal},
-				DstPort: "18080",
+				DstPort: 18080,
 			}, {
 				Dest:    httpServerRef,
 				Source:  &securityv1alpha1.WorkloadRef{Identity: clientPrincipal},
-				DstPort: "18080",
+				DstPort: 18080,
 			}},
 			wantProposalName: httpServerProposal,
 			wantSelector:     httpServerLabels,
@@ -125,22 +125,22 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 				{
 					Dest:    httpServerRef,
 					Source:  &securityv1alpha1.WorkloadRef{Identity: clientPrincipal},
-					DstPort: "18080",
+					DstPort: 18080,
 				},
 				{
 					Dest:    httpServerRef,
 					Source:  &securityv1alpha1.WorkloadRef{Identity: clientPrincipal},
-					DstPort: "18081",
+					DstPort: 18081,
 				},
 				{
 					Dest:    httpServerRef,
 					Source:  &securityv1alpha1.WorkloadRef{Identity: clientPrincipal},
-					DstPort: "18080",
+					DstPort: 18080,
 				},
 				{
 					Dest:    httpServerRef,
 					Source:  &securityv1alpha1.WorkloadRef{Identity: otherPrincipal},
-					DstPort: "18080",
+					DstPort: 18080,
 				},
 			},
 			wantProposalName: httpServerProposal,
@@ -214,7 +214,7 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 			events: []netypes.LearningEvent{{
 				Dest:    httpServerRef,
 				Source:  &securityv1alpha1.WorkloadRef{Identity: clientPrincipal},
-				DstPort: "18081",
+				DstPort: 18081,
 			}},
 			wantProposalName: httpServerProposal,
 			wantSelector:     httpServerLabels,
@@ -250,7 +250,7 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 			events: []netypes.LearningEvent{{
 				Dest:    backendRef,
 				Source:  &securityv1alpha1.WorkloadRef{Identity: clientPrincipal},
-				DstPort: "8080",
+				DstPort: 8080,
 			}},
 			wantProposalLen: 0,
 		},
@@ -268,6 +268,9 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 			ctx := context.Background()
 
 			for _, evt := range tt.events {
+				if evt.Backend == "" {
+					evt.Backend = securityv1alpha1.PolicyBackendIstio
+				}
 				_, err := r.Reconcile(ctx, evt)
 				require.NoError(t, err)
 			}

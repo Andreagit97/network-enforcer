@@ -177,6 +177,12 @@ func (s *IstioScraper) enqueueLearningEvent(ctx context.Context, attrs map[strin
 		return
 	}
 
+	dstPortInt, err := strconv.Atoi(dstPort)
+	if err != nil {
+		s.Logger.WarnContext(ctx, "Failed to parse destination port", "dstPort", dstPort, "error", err)
+		return
+	}
+
 	if s.Enricher == nil {
 		s.Logger.ErrorContext(ctx, "cannot send learning events without enricher")
 		return
@@ -202,9 +208,11 @@ func (s *IstioScraper) enqueueLearningEvent(ctx context.Context, attrs map[strin
 	// - for the source, the identity is enough, we don't need the workload name or labels.
 	// - for the destination, we need the workload name and labels but not the identity.
 	learningEvent := types.LearningEvent{
-		Source:  &securityv1alpha1.WorkloadRef{Identity: srcIdentity},
-		Dest:    &dstWorkloadRef,
-		DstPort: dstPort,
+		Source:   &securityv1alpha1.WorkloadRef{Identity: srcIdentity},
+		Dest:     &dstWorkloadRef,
+		DstPort:  dstPortInt,
+		Protocol: corev1.ProtocolTCP, // the protocol is always TCP for Istio.
+		Backend:  securityv1alpha1.PolicyBackendIstio,
 	}
 	if !s.EnqueueLearningEvent(learningEvent) {
 		// todo!: we can consider some rate limiting here

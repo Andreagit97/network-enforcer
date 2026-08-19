@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
@@ -79,7 +80,7 @@ func (r *LearningReconciler) updateProposal(
 			}
 		}
 
-		upsertIstioLearnedRule(proposal.Spec.Istio, evt.Source.Identity, evt.DstPort)
+		upsertIstioLearnedRule(proposal.Spec.Istio, evt.Source.Identity, strconv.Itoa(evt.DstPort))
 		return nil
 	}); err != nil {
 		return fmt.Errorf("create or update proposal %s/%s: %w", proposal.Namespace, proposal.Name, err)
