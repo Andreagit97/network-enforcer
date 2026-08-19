@@ -15,6 +15,9 @@ import (
 )
 
 func (r *LearningReconciler) processKubernetesLearningEvent(ctx context.Context, req types.LearningEvent) error {
+	if req.Source == nil || req.Dest == nil {
+		return errors.New("invalid learning event: missing source or destination")
+	}
 	// For each learning event we maintain two separate proposals:
 	// - source workload -> egress rule
 	// - destination workload -> ingress rule

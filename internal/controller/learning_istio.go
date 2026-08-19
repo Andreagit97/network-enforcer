@@ -85,6 +85,9 @@ func upsertIstioLearnedRule(
 func (r *LearningReconciler) processIstioLearningEvent(ctx context.Context, req types.LearningEvent) error {
 	// For istio proposals are inbound, so we always need to create an inbound proposal for
 	// the destination.
+	if req.Dest == nil {
+		return errors.New("invalid learning event: missing destination")
+	}
 	wk := req.Dest
 	proposalName := getProposalName(wk, networkingv1.PolicyTypeIngress)
 	policies, err := checkExistingPolicy(ctx, r.Client, wk.Namespace, proposalName)
