@@ -24,7 +24,6 @@ func Get(
 		return securityv1alpha1.WorkloadRef{}, fmt.Errorf("getting Pod %q: %w", podNamespacedName, err)
 	}
 	ref := GetNameAndKind(&pod)
-	ref.SetIdentity(pod.Spec.ServiceAccountName)
 	if !ref.IsSupported() {
 		return ref, nil
 	}

@@ -176,7 +176,7 @@ func TestWorkloadKeyFromPod(t *testing.T) {
 		Namespace: testNamespace,
 		OwnerKind: securityv1alpha1.WorkloadKindDeployment,
 		OwnerName: "frontend",
-		Identity:  "cluster.local/ns/default/sa/default",
+		Identity:  "", // identity is not populated by this method
 		Selector:  metav1.LabelSelector{MatchLabels: map[string]string{"app": "frontend"}},
 	}, got)
 

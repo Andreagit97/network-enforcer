@@ -94,7 +94,6 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 					Namespace: "default",
 					OwnerKind: securityv1alpha1.WorkloadKindDeployment,
 					OwnerName: "http-server",
-					Identity:  "cluster.local/ns/default/sa/default",
 					Selector: metav1.LabelSelector{MatchLabels: map[string]string{
 						"app": "http-server",
 					}},
