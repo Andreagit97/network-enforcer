@@ -16,7 +16,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.11.0
 	google.golang.org/grpc v1.83.0
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
-	istio.io/api v1.30.3-0.20260710004328-2e43f07b30b6
+	istio.io/api v1.31.0-beta.0
 	istio.io/client-go v1.30.3
 	k8s.io/api v0.36.3
 	k8s.io/apimachinery v0.36.3
