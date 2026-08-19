@@ -9,7 +9,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	netypes "github.com/rancher-sandbox/network-enforcer/internal/types"
@@ -30,7 +29,7 @@ func newPromotedIstioWNP(namespacedName types.NamespacedName) *securityv1alpha1.
 				Backend: securityv1alpha1.PolicyBackendIstio,
 				Istio: &securityv1alpha1.IstioAuthorizationPolicySpec{
 					Selector: metav1.LabelSelector{
-						MatchLabels: map[string]string{"example": "test"},
+						MatchLabels: map[string]string{"example": "test-istio"},
 					},
 				},
 			},
@@ -53,7 +52,7 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 		Selector:  metav1.LabelSelector{MatchLabels: map[string]string{"app": "http-server"}},
 	}
 
-	newEventToHTTPServer := func(dstPort int, srcIdentity string) netypes.LearningEvent {
+	newEvent := func(dstPort int, srcIdentity string) netypes.LearningEvent {
 		return netypes.LearningEvent{
 			Source:  &securityv1alpha1.WorkloadRef{Identity: srcIdentity},
 			Dest:    httpServerRef,
@@ -63,11 +62,13 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 	}
 
 	assertHTTPProposal := func(t *testing.T, r *LearningReconciler, rules []securityv1alpha1.IstioAuthorizationPolicyRule) {
+		t.Helper()
 		proposal := getProposalMetadata(httpServerRef, networkingv1.PolicyTypeIngress)
 		err := r.Get(t.Context(), proposal.NamespacedName(), proposal)
 		require.NoError(t, err)
 		require.Equal(t, securityv1alpha1.PolicyBackendIstio, proposal.Spec.Backend)
 		require.NotNil(t, proposal.Spec.Istio)
+		require.Nil(t, proposal.Spec.Kubernetes)
 		require.Equal(t, httpServerRef.Selector, proposal.Spec.Istio.Selector)
 		require.ElementsMatch(t, rules, proposal.Spec.Istio.Rules)
 	}
@@ -82,8 +83,8 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 			name: "stable_proposal_per_deployment_across_replicas",
 			events: []netypes.LearningEvent{
 				// we simulate the same connection seen by different replicas
-				newEventToHTTPServer(18080, clientPrincipal),
-				newEventToHTTPServer(18080, clientPrincipal),
+				newEvent(18080, clientPrincipal),
+				newEvent(18080, clientPrincipal),
 			},
 			assert: func(t *testing.T, r *LearningReconciler) {
 				assertHTTPProposal(t, r, []securityv1alpha1.IstioAuthorizationPolicyRule{
@@ -101,10 +102,10 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 		{
 			name: "merges_ports_and_principals",
 			events: []netypes.LearningEvent{
-				newEventToHTTPServer(18080, clientPrincipal),
-				newEventToHTTPServer(18081, clientPrincipal),
-				newEventToHTTPServer(18080, clientPrincipal),
-				newEventToHTTPServer(18080, otherPrincipal),
+				newEvent(18080, clientPrincipal),
+				newEvent(18081, clientPrincipal),
+				newEvent(18080, clientPrincipal),
+				newEvent(18080, otherPrincipal),
 			},
 			assert: func(t *testing.T, r *LearningReconciler) {
 				assertHTTPProposal(t, r, []securityv1alpha1.IstioAuthorizationPolicyRule{
@@ -135,7 +136,7 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 				),
 			},
 			events: []netypes.LearningEvent{
-				newEventToHTTPServer(18080, clientPrincipal),
+				newEvent(18080, clientPrincipal),
 			},
 			assert: func(t *testing.T, r *LearningReconciler) {
 				proposal := getProposalMetadata(httpServerRef, networkingv1.PolicyTypeIngress)
@@ -148,12 +149,7 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-
-			cl := fake.NewClientBuilder().
-				WithScheme(newWorkloadTestScheme(t)).
-				WithObjects(tt.objs...).
-				Build()
-			r := NewLearningReconciler(cl)
+			r := newTestLearningReconciler(t, tt.objs)
 
 			for _, evt := range tt.events {
 				_, err := r.Reconcile(t.Context(), evt)

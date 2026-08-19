@@ -63,7 +63,10 @@ func (r *LearningReconciler) Reconcile(
 	ctx context.Context,
 	req types.LearningEvent,
 ) (ctrl.Result, error) {
-	return ctrl.Result{}, r.processIstioLearningEvent(ctx, req)
+	if req.Backend == securityv1alpha1.PolicyBackendIstio {
+		return ctrl.Result{}, r.processIstioLearningEvent(ctx, req)
+	}
+	return ctrl.Result{}, r.processKubernetesLearningEvent(ctx, req)
 }
 
 type ProcessEventHandler struct {
