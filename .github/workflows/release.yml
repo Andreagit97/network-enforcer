@@ -51,7 +51,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Merge images
-        uses: rancher-sandbox/runtime-enforcer/.github/actions/merge-multiarch@ee1d7a3b1f785fadf8d9c914680e5596ebbd38e1
+        uses: rancher-sandbox/runtime-enforcer/.github/actions/merge-multiarch@d00c26279237d1015fa5d38a86a7e168ec9419cd
         with:
           arch: amd64,arm64
           image: ${{ matrix.component }}
