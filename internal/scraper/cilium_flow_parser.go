@@ -11,6 +11,7 @@ import (
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	"github.com/rancher-sandbox/network-enforcer/internal/workload"
 	corev1 "k8s.io/api/core/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
 var errEndpointHasNoWorkload = errors.New("endpoint has no associated workload")
@@ -54,6 +55,34 @@ func fromEndpointToWorkloadRef(endpoint *hubbleObserver.Endpoint) (*securityv1al
 	}
 
 	if len(endpoint.GetWorkloads()) == 0 {
+		// Here we have 2 possible cases
+		// 1. the endpoint is a pod but hubble is not able to resolve the workload.
+		// 2. the endpoint is not a pod but the local node.
+		if endpoint.GetPodName() != "" {
+			// This is an example where the pod is part of a deployment
+			// but hubble is not able to resolve it. We return the pod here as
+			// workload and we will try the resolution later.
+			//
+			// "destination": {
+			// 	"identity": 24995,
+			// 	"cluster_name": "default",
+			// 	"namespace": "kube-system",
+			// 	"labels": [
+			// 		"k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=kube-system",
+			// 		"k8s:io.cilium.k8s.policy.cluster=default",
+			// 		"k8s:io.cilium.k8s.policy.serviceaccount=coredns",
+			// 		"k8s:io.kubernetes.pod.namespace=kube-system",
+			// 		"k8s:k8s-app=kube-dns"
+			// 	],
+			// 	"pod_name": "coredns-7d764666f9-hjbxq"
+			// },
+			return &securityv1alpha1.WorkloadRef{
+				Namespace: endpoint.GetNamespace(),
+				OwnerName: endpoint.GetPodName(),
+				OwnerKind: securityv1alpha1.WorkloadKindPod,
+			}, nil
+		}
+
 		// in case of host connections or connections to the api server we usually don't have a workload associated.
 		// For now we will skip those cases.
 		// Examples:
@@ -112,6 +141,11 @@ func extractPortAndProtocol(flowInfo *flowpb.Flow) (uint32, corev1.Protocol, err
 	return dstPort, proto, nil
 }
 
+func shouldSkipWorkload(workload *securityv1alpha1.WorkloadRef) bool {
+	// we keep also pods here because we will handle them later
+	return !workload.IsSupported() && workload.OwnerKind != securityv1alpha1.WorkloadKindPod
+}
+
 func parseCiliumFlowResponse(flow *flowpb.Flow) processFlowResult {
 	if discardFlow(flow) {
 		return processFlowSkip()
@@ -132,7 +166,7 @@ func parseCiliumFlowResponse(flow *flowpb.Flow) processFlowResult {
 		}
 		return processFlowError(fmt.Errorf("cannot get source workload: %w", err))
 	}
-	if !sourceWorkload.IsSupported() {
+	if shouldSkipWorkload(sourceWorkload) {
 		return processFlowSkip()
 	}
 
@@ -143,7 +177,7 @@ func parseCiliumFlowResponse(flow *flowpb.Flow) processFlowResult {
 		}
 		return processFlowError(fmt.Errorf("cannot get destination workload: %w", err))
 	}
-	if !destWorkload.IsSupported() {
+	if shouldSkipWorkload(destWorkload) {
 		return processFlowSkip()
 	}
 
@@ -165,12 +199,27 @@ func (s *CiliumScraper) processFlowResponse(
 		return parsed
 	}
 
-	if err := workload.LookupPodSelectorForWorkload(ctx, s.Client, parsed.event.Source); err != nil {
-		return processFlowError(fmt.Errorf("failed to lookup pod selector for source workload: %w", err))
-	}
-
-	if err := workload.LookupPodSelectorForWorkload(ctx, s.Client, parsed.event.Dest); err != nil {
-		return processFlowError(fmt.Errorf("failed to lookup pod selector for destination workload: %w", err))
+	for _, endpoint := range []*securityv1alpha1.WorkloadRef{parsed.event.Source, parsed.event.Dest} {
+		if endpoint.OwnerKind != securityv1alpha1.WorkloadKindPod {
+			if err := workload.LookupPodSelectorForWorkload(ctx, s.Client, endpoint); err != nil {
+				return processFlowError(fmt.Errorf("failed to lookup pod selector for workload %q: %w",
+					endpoint.OwnerName, err))
+			}
+			continue
+		}
+		resolved, err := workload.Get(ctx, s.Client, k8stypes.NamespacedName{
+			Namespace: endpoint.Namespace,
+			Name:      endpoint.OwnerName,
+		})
+		if err != nil {
+			return processFlowError(fmt.Errorf("failed to resolve pod %q to workload: %w", endpoint.OwnerName, err))
+		}
+		// it is possible that here we have still a pod as kind if the pod was a standalone pod
+		// in this case we skip.
+		if !resolved.IsSupported() {
+			return processFlowSkip()
+		}
+		*endpoint = resolved
 	}
 
 	return parsed

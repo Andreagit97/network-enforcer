@@ -82,10 +82,39 @@ func TestParseCiliumFlow(t *testing.T) {
 			flow: &flowpb.Flow{
 				IsReply:     wrapperspb.Bool(false),
 				L4:          &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
-				Source:      endpoint("source-pod", "Pod"),
+				Source:      endpoint("source-job", "Job"),
 				Destination: endpoint("dest-deploy", "Deployment"),
 			},
 			processFlowResult: processFlowSkip(),
+		},
+		{
+			name: "source_pod_workload_is_kept_for_later_resolution",
+			flow: &flowpb.Flow{
+				IsReply: wrapperspb.Bool(false),
+				L4:      &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
+				Source:  endpoint("source-deploy", "Deployment"),
+				Destination: &hubbleObserver.Endpoint{
+					Namespace: defaultCiliumTestNamespace,
+					PodName:   "dest-pod",
+				},
+			},
+			processFlowResult: processFlowEnqueue(
+				types.LearningEvent{
+					Source: &securityv1alpha1.WorkloadRef{
+						Namespace: defaultCiliumTestNamespace,
+						OwnerName: "source-deploy",
+						OwnerKind: securityv1alpha1.WorkloadKindDeployment,
+					},
+					Dest: &securityv1alpha1.WorkloadRef{
+						Namespace: defaultCiliumTestNamespace,
+						OwnerName: "dest-pod",
+						OwnerKind: securityv1alpha1.WorkloadKindPod,
+					},
+					DstPort:  8080,
+					Protocol: corev1.ProtocolTCP,
+					Backend:  securityv1alpha1.PolicyBackendKubernetes,
+				},
+			),
 		},
 		{
 			name: "endpoint_without_workload_is_skipped",
@@ -190,6 +219,9 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 
 	scheme := runtime.NewScheme()
 	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	controller := true
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(
@@ -205,6 +237,30 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "dest"}},
 				},
 			},
+			&appsv1.DaemonSet{
+				ObjectMeta: metav1.ObjectMeta{Name: "dns-daemon", Namespace: "kube-system"},
+				Spec: appsv1.DaemonSetSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"k8s-app": "kube-dns"}},
+				},
+			},
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "coredns-pod",
+					Namespace: "kube-system",
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "apps/v1",
+						Kind:       "DaemonSet",
+						Name:       "dns-daemon",
+						Controller: &controller,
+					}},
+				},
+			},
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "standalone-pod",
+					Namespace: "kube-system",
+				},
+			},
 		).Build()
 
 	s := NewCiliumScraper(CiliumScraperConfig{
@@ -216,7 +272,6 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 		name              string
 		flow              *hubbleObserver.GetFlowsResponse
 		processFlowResult processFlowResult
-		assert            func(t *testing.T, result processFlowResult)
 	}{
 		{
 			name: "both_workloads_present",
@@ -251,7 +306,40 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 			}),
 		},
 		{
-			name: "missing_dst",
+			name: "resolve_dest_pod_to_workload",
+			flow: flowResponse(&flowpb.Flow{
+				IsReply: wrapperspb.Bool(false),
+				L4:      &flowpb.Layer4{Protocol: &flowpb.Layer4_UDP{UDP: &flowpb.UDP{DestinationPort: 53}}},
+				Source: &hubbleObserver.Endpoint{
+					Namespace: defaultCiliumTestNamespace,
+					Workloads: []*flowpb.Workload{{Name: "source-deploy", Kind: "Deployment"}},
+				},
+				// this is a pod associated to a daemonset we have in cache.
+				Destination: &hubbleObserver.Endpoint{
+					Namespace: "kube-system",
+					PodName:   "coredns-pod",
+				},
+			}),
+			processFlowResult: processFlowEnqueue(types.LearningEvent{
+				Source: &securityv1alpha1.WorkloadRef{
+					Namespace: defaultCiliumTestNamespace,
+					OwnerName: "source-deploy",
+					OwnerKind: securityv1alpha1.WorkloadKindDeployment,
+					Selector:  metav1.LabelSelector{MatchLabels: map[string]string{"app": "source"}},
+				},
+				Dest: &securityv1alpha1.WorkloadRef{
+					Namespace: "kube-system",
+					OwnerName: "dns-daemon",
+					OwnerKind: securityv1alpha1.WorkloadKindDaemonSet,
+					Selector:  metav1.LabelSelector{MatchLabels: map[string]string{"k8s-app": "kube-dns"}},
+				},
+				DstPort:  53,
+				Protocol: corev1.ProtocolUDP,
+				Backend:  securityv1alpha1.PolicyBackendKubernetes,
+			}),
+		},
+		{
+			name: "missing_dst_selector",
 			flow: flowResponse(&flowpb.Flow{
 				IsReply: wrapperspb.Bool(false),
 				L4:      &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
@@ -265,6 +353,38 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 				},
 			}),
 			processFlowResult: testProcessFlowOutcomeError(),
+		},
+		{
+			name: "cannot_resolve_dest_pod",
+			flow: flowResponse(&flowpb.Flow{
+				IsReply: wrapperspb.Bool(false),
+				L4:      &flowpb.Layer4{Protocol: &flowpb.Layer4_UDP{UDP: &flowpb.UDP{DestinationPort: 53}}},
+				Source: &hubbleObserver.Endpoint{
+					Namespace: defaultCiliumTestNamespace,
+					Workloads: []*flowpb.Workload{{Name: "source-deploy", Kind: "Deployment"}},
+				},
+				Destination: &hubbleObserver.Endpoint{
+					Namespace: "kube-system",
+					PodName:   "does-not-exist",
+				},
+			}),
+			processFlowResult: testProcessFlowOutcomeError(),
+		},
+		{
+			name: "dest_pod_is_standalone_skip",
+			flow: flowResponse(&flowpb.Flow{
+				IsReply: wrapperspb.Bool(false),
+				L4:      &flowpb.Layer4{Protocol: &flowpb.Layer4_UDP{UDP: &flowpb.UDP{DestinationPort: 53}}},
+				Source: &hubbleObserver.Endpoint{
+					Namespace: defaultCiliumTestNamespace,
+					Workloads: []*flowpb.Workload{{Name: "source-deploy", Kind: "Deployment"}},
+				},
+				Destination: &hubbleObserver.Endpoint{
+					Namespace: "kube-system",
+					PodName:   "standalone-pod",
+				},
+			}),
+			processFlowResult: processFlowSkip(),
 		},
 		{
 			name:              "nil_flow_response",
@@ -307,8 +427,8 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 
 			result := s.processFlow(t.Context(), tc.flow)
 			require.Equal(t, tc.processFlowResult.outcome, result.outcome)
-			if tc.assert != nil {
-				tc.assert(t, result)
+			if tc.processFlowResult.outcome == processFlowOutcomeEnqueue {
+				require.Equal(t, tc.processFlowResult.event, result.event)
 			}
 		})
 	}
