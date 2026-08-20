@@ -6,6 +6,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// todo!: revisit this file, many types should be removed.
+
 type CNIType string
 
 const (
@@ -74,6 +76,14 @@ type PolicyDenyEvent struct {
 	// The K8s NetworkPolicies or CiliumNetworkPolicies denying the ingress of the flow
 	IngressEnforcedBy []Policy `json:"ingress_enforced_by,omitempty"`
 }
+
+type Provider string
+
+const (
+	ProviderIstio  Provider = "istio"
+	ProviderCilium Provider = "cilium"
+	ProviderCalico Provider = "calico"
+)
 
 // LearningEvent represents a learning event in the network enforcer.
 type LearningEvent struct {
