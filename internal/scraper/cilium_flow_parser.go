@@ -165,10 +165,6 @@ func (s *CiliumScraper) processFlowResponse(
 		return parsed
 	}
 
-	if s.Client == nil {
-		return processFlowError(errors.New("kubernetes client is not configured"))
-	}
-
 	if err := workload.LookupPodSelectorForWorkload(ctx, s.Client, parsed.event.Source); err != nil {
 		return processFlowError(fmt.Errorf("failed to lookup pod selector for source workload: %w", err))
 	}
