@@ -49,46 +49,50 @@ func convertCiliumKindToSecurityWorkloadKind(kind string) securityv1alpha1.Workl
 	return securityv1alpha1.WorkloadKind(kind)
 }
 
+func handleNoWorkload(endpoint *hubbleObserver.Endpoint) (*securityv1alpha1.WorkloadRef, error) {
+	// Here we have 2 possible cases
+	// 1. the endpoint is a pod but hubble is not able to resolve the workload.
+	// 2. the endpoint is not a pod but the local node.
+	if endpoint.GetPodName() != "" {
+		// This is an example where the pod is part of a deployment
+		// but hubble is not able to resolve it. We return the pod here as
+		// workload and we will try the resolution later.
+		//
+		// "destination": {
+		// 	"identity": 24995,
+		// 	"cluster_name": "default",
+		// 	"namespace": "kube-system",
+		// 	"labels": [
+		// 		"k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=kube-system",
+		// 		"k8s:io.cilium.k8s.policy.cluster=default",
+		// 		"k8s:io.cilium.k8s.policy.serviceaccount=coredns",
+		// 		"k8s:io.kubernetes.pod.namespace=kube-system",
+		// 		"k8s:k8s-app=kube-dns"
+		// 	],
+		// 	"pod_name": "coredns-7d764666f9-hjbxq"
+		// },
+		return &securityv1alpha1.WorkloadRef{
+			Namespace: endpoint.GetNamespace(),
+			OwnerName: endpoint.GetPodName(),
+			OwnerKind: securityv1alpha1.WorkloadKindPod,
+		}, nil
+	}
+
+	// in case of host connections or connections to the api server we usually don't have a workload associated.
+	// For now we will skip those cases.
+	// Examples:
+	// "source":{"identity":1,"labels":["reserved:host"]}
+	// "source":{"identity":1,"labels":["reserved:host","reserved:kube-apiserver"]}
+	return nil, errEndpointHasNoWorkload
+}
+
 func fromEndpointToWorkloadRef(endpoint *hubbleObserver.Endpoint) (*securityv1alpha1.WorkloadRef, error) {
 	if endpoint == nil {
 		return nil, errors.New("endpoint is nil")
 	}
 
 	if len(endpoint.GetWorkloads()) == 0 {
-		// Here we have 2 possible cases
-		// 1. the endpoint is a pod but hubble is not able to resolve the workload.
-		// 2. the endpoint is not a pod but the local node.
-		if endpoint.GetPodName() != "" {
-			// This is an example where the pod is part of a deployment
-			// but hubble is not able to resolve it. We return the pod here as
-			// workload and we will try the resolution later.
-			//
-			// "destination": {
-			// 	"identity": 24995,
-			// 	"cluster_name": "default",
-			// 	"namespace": "kube-system",
-			// 	"labels": [
-			// 		"k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=kube-system",
-			// 		"k8s:io.cilium.k8s.policy.cluster=default",
-			// 		"k8s:io.cilium.k8s.policy.serviceaccount=coredns",
-			// 		"k8s:io.kubernetes.pod.namespace=kube-system",
-			// 		"k8s:k8s-app=kube-dns"
-			// 	],
-			// 	"pod_name": "coredns-7d764666f9-hjbxq"
-			// },
-			return &securityv1alpha1.WorkloadRef{
-				Namespace: endpoint.GetNamespace(),
-				OwnerName: endpoint.GetPodName(),
-				OwnerKind: securityv1alpha1.WorkloadKindPod,
-			}, nil
-		}
-
-		// in case of host connections or connections to the api server we usually don't have a workload associated.
-		// For now we will skip those cases.
-		// Examples:
-		// "source":{"identity":1,"labels":["reserved:host"]}
-		// "source":{"identity":1,"labels":["reserved:host","reserved:kube-apiserver"]}
-		return nil, errEndpointHasNoWorkload
+		return handleNoWorkload(endpoint)
 	}
 
 	if len(endpoint.GetWorkloads()) > 1 {
