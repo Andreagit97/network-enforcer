@@ -128,7 +128,7 @@ func setupProviderScraper(
 			EnqueueLearningEvent: learningEnqueueFunc,
 		})
 		if err := mgr.Add(ciliumScraper); err != nil {
-			return fmt.Errorf("unable to add istio scraper to manager: %w", err)
+			return fmt.Errorf("unable to add cilium scraper to manager: %w", err)
 		}
 		return nil
 	case types.ProviderCalico:
