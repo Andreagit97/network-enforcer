@@ -112,21 +112,12 @@ func extractPortAndProtocol(flowInfo *flowpb.Flow) (uint32, corev1.Protocol, err
 	return dstPort, proto, nil
 }
 
-func parseCiliumFlow(flow *hubbleObserver.GetFlowsResponse) processFlowResult {
-	if flow == nil {
-		return processFlowError(errors.New("found nil flow response"))
-	}
-
-	flowInfo := flow.GetFlow()
-	if flowInfo == nil {
-		return processFlowError(errors.New("found empty flow"))
-	}
-
-	if discardFlow(flowInfo) {
+func parseCiliumFlowResponse(flow *flowpb.Flow) processFlowResult {
+	if discardFlow(flow) {
 		return processFlowSkip()
 	}
 
-	dstPort, proto, err := extractPortAndProtocol(flowInfo)
+	dstPort, proto, err := extractPortAndProtocol(flow)
 	if err != nil {
 		if errors.Is(err, errUnsupportedProtocol) {
 			return processFlowSkip()
@@ -134,7 +125,7 @@ func parseCiliumFlow(flow *hubbleObserver.GetFlowsResponse) processFlowResult {
 		return processFlowError(err)
 	}
 
-	sourceWorkload, err := fromEndpointToWorkloadRef(flowInfo.GetSource())
+	sourceWorkload, err := fromEndpointToWorkloadRef(flow.GetSource())
 	if err != nil {
 		if errors.Is(err, errEndpointHasNoWorkload) {
 			return processFlowSkip()
@@ -145,7 +136,7 @@ func parseCiliumFlow(flow *hubbleObserver.GetFlowsResponse) processFlowResult {
 		return processFlowSkip()
 	}
 
-	destWorkload, err := fromEndpointToWorkloadRef(flowInfo.GetDestination())
+	destWorkload, err := fromEndpointToWorkloadRef(flow.GetDestination())
 	if err != nil {
 		if errors.Is(err, errEndpointHasNoWorkload) {
 			return processFlowSkip()
@@ -165,11 +156,11 @@ func parseCiliumFlow(flow *hubbleObserver.GetFlowsResponse) processFlowResult {
 	})
 }
 
-func (s *CiliumScraper) processFlow(
+func (s *CiliumScraper) processFlowResponse(
 	ctx context.Context,
-	flow *hubbleObserver.GetFlowsResponse,
+	flow *flowpb.Flow,
 ) processFlowResult {
-	parsed := parseCiliumFlow(flow)
+	parsed := parseCiliumFlowResponse(flow)
 	if parsed.outcome != processFlowOutcomeEnqueue {
 		return parsed
 	}
@@ -187,4 +178,36 @@ func (s *CiliumScraper) processFlow(
 	}
 
 	return parsed
+}
+
+func (s *CiliumScraper) processFlow(
+	ctx context.Context,
+	flow *hubbleObserver.GetFlowsResponse,
+) processFlowResult {
+	if flow == nil {
+		return processFlowError(errors.New("found nil flow"))
+	}
+
+	switch flow.GetResponseTypes().(type) {
+	case *hubbleObserver.GetFlowsResponse_Flow:
+		flowResponse := flow.GetFlow()
+		if flowResponse == nil {
+			return processFlowError(errors.New("found nil response flow"))
+		}
+		return s.processFlowResponse(ctx, flowResponse)
+	case *hubbleObserver.GetFlowsResponse_LostEvents:
+		flowLost := flow.GetLostEvents()
+		if flowLost == nil {
+			return processFlowError(errors.New("found nil flow lost event"))
+		}
+		s.Logger.WarnContext(ctx, "Hubble lost events",
+			"count", flowLost.GetNumEventsLost(),
+			"source", flowLost.GetSource(),
+		)
+		return processFlowSkip()
+	case *hubbleObserver.GetFlowsResponse_NodeStatus:
+		return processFlowSkip()
+	default:
+		return processFlowSkip()
+	}
 }

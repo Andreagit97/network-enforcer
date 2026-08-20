@@ -6,6 +6,7 @@ import (
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	hubbleObserver "github.com/cilium/cilium/api/v1/observer"
+	"github.com/cilium/cilium/api/v1/relay"
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/testutil"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
@@ -26,11 +27,15 @@ func flowResponse(flow *flowpb.Flow) *hubbleObserver.GetFlowsResponse {
 	}
 }
 
+func testProcessFlowOutcomeError() processFlowResult {
+	return processFlowResult{
+		outcome: processFlowOutcomeError,
+		err:     errors.New("example error, not relevant"),
+	}
+}
+
 func TestParseCiliumFlow(t *testing.T) {
 	t.Parallel()
-
-	// if the outcome is error we don't check the error msg.
-	testProcessFlowOutcomeError := processFlowError(errors.New("example error, not relevant"))
 
 	endpoint := func(name, kind string) *hubbleObserver.Endpoint {
 		return &hubbleObserver.Endpoint{
@@ -44,57 +49,47 @@ func TestParseCiliumFlow(t *testing.T) {
 
 	tests := []struct {
 		name              string
-		flow              *hubbleObserver.GetFlowsResponse
+		flow              *flowpb.Flow
 		processFlowResult processFlowResult
 	}{
 		{
-			name:              "nil_flow",
-			flow:              nil,
-			processFlowResult: testProcessFlowOutcomeError,
-		},
-		{
-			name:              "empty_flow",
-			flow:              flowResponse(nil),
-			processFlowResult: testProcessFlowOutcomeError,
-		},
-		{
 			name: "reply_flow_is_skipped",
-			flow: flowResponse(&flowpb.Flow{
+			flow: &flowpb.Flow{
 				IsReply: wrapperspb.Bool(true),
-			}),
+			},
 			processFlowResult: processFlowSkip(),
 		},
 		{
 			name: "dropped_flow_is_skipped",
-			flow: flowResponse(&flowpb.Flow{
+			flow: &flowpb.Flow{
 				IsReply: wrapperspb.Bool(false),
 				Verdict: flowpb.Verdict_DROPPED,
-			}),
+			},
 			processFlowResult: processFlowSkip(),
 		},
 		{
 			name: "unsupported_protocol",
-			flow: flowResponse(&flowpb.Flow{
+			flow: &flowpb.Flow{
 				IsReply:     wrapperspb.Bool(false),
 				L4:          &flowpb.Layer4{Protocol: &flowpb.Layer4_ICMPv4{ICMPv4: &flowpb.ICMPv4{}}},
 				Source:      endpoint("source-deploy", "Deployment"),
 				Destination: endpoint("dest-deploy", "Deployment"),
-			}),
+			},
 			processFlowResult: processFlowSkip(),
 		},
 		{
 			name: "unsupported_source_workload_kind",
-			flow: flowResponse(&flowpb.Flow{
+			flow: &flowpb.Flow{
 				IsReply:     wrapperspb.Bool(false),
 				L4:          &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
 				Source:      endpoint("source-pod", "Pod"),
 				Destination: endpoint("dest-deploy", "Deployment"),
-			}),
+			},
 			processFlowResult: processFlowSkip(),
 		},
 		{
 			name: "endpoint_without_workload_is_skipped",
-			flow: flowResponse(&flowpb.Flow{
+			flow: &flowpb.Flow{
 				IsReply: wrapperspb.Bool(false),
 				L4:      &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
 				Source: &hubbleObserver.Endpoint{
@@ -102,12 +97,12 @@ func TestParseCiliumFlow(t *testing.T) {
 					// No workload associated will cause a skip.
 				},
 				Destination: endpoint("dest-deploy", "Deployment"),
-			}),
+			},
 			processFlowResult: processFlowSkip(),
 		},
 		{
 			name: "endpoint_with_multiple_workloads",
-			flow: flowResponse(&flowpb.Flow{
+			flow: &flowpb.Flow{
 				IsReply: wrapperspb.Bool(false),
 				L4:      &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
 				Source: &hubbleObserver.Endpoint{
@@ -118,17 +113,17 @@ func TestParseCiliumFlow(t *testing.T) {
 					},
 				},
 				Destination: endpoint("dest-deploy", "Deployment"),
-			}),
-			processFlowResult: testProcessFlowOutcomeError,
+			},
+			processFlowResult: testProcessFlowOutcomeError(),
 		},
 		{
 			name: "valid_tcp_flow",
-			flow: flowResponse(&flowpb.Flow{
+			flow: &flowpb.Flow{
 				IsReply:     wrapperspb.Bool(false),
 				L4:          &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
 				Source:      endpoint("source-deploy", "Deployment"),
 				Destination: endpoint("dest-deploy", "Deployment"),
-			}),
+			},
 			processFlowResult: processFlowEnqueue(
 				types.LearningEvent{
 					Source: &securityv1alpha1.WorkloadRef{
@@ -151,12 +146,12 @@ func TestParseCiliumFlow(t *testing.T) {
 		},
 		{
 			name: "valid_udp_flow",
-			flow: flowResponse(&flowpb.Flow{
+			flow: &flowpb.Flow{
 				IsReply:     wrapperspb.Bool(false),
 				L4:          &flowpb.Layer4{Protocol: &flowpb.Layer4_UDP{UDP: &flowpb.UDP{DestinationPort: 5353}}},
 				Source:      endpoint("source-sts", "StatefulSet"),
 				Destination: endpoint("dest-ds", "DaemonSet"),
-			}),
+			},
 			processFlowResult: processFlowEnqueue(
 				types.LearningEvent{
 					Source: &securityv1alpha1.WorkloadRef{
@@ -180,7 +175,7 @@ func TestParseCiliumFlow(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			result := parseCiliumFlow(tc.flow)
+			result := parseCiliumFlowResponse(tc.flow)
 			require.Equal(t, tc.processFlowResult.outcome, result.outcome)
 			// we assert the learning event if we have it
 			if tc.processFlowResult.outcome == processFlowOutcomeEnqueue {
@@ -217,43 +212,104 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 		Logger: testutil.NewTestLogger(t),
 	})
 
-	t.Run("both_workloads_present", func(t *testing.T) {
-		t.Parallel()
+	tests := []struct {
+		name              string
+		flow              *hubbleObserver.GetFlowsResponse
+		processFlowResult processFlowResult
+		assert            func(t *testing.T, result processFlowResult)
+	}{
+		{
+			name: "both_workloads_present",
+			flow: flowResponse(&flowpb.Flow{
+				IsReply: wrapperspb.Bool(false),
+				L4:      &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
+				Source: &hubbleObserver.Endpoint{
+					Namespace: defaultCiliumTestNamespace,
+					Workloads: []*flowpb.Workload{{Name: "source-deploy", Kind: "Deployment"}},
+				},
+				Destination: &hubbleObserver.Endpoint{
+					Namespace: defaultCiliumTestNamespace,
+					Workloads: []*flowpb.Workload{{Name: "dest-deploy", Kind: "Deployment"}},
+				},
+			}),
+			processFlowResult: processFlowEnqueue(types.LearningEvent{
+				Source: &securityv1alpha1.WorkloadRef{
+					Namespace: defaultCiliumTestNamespace,
+					OwnerName: "source-deploy",
+					OwnerKind: securityv1alpha1.WorkloadKindDeployment,
+					Selector:  metav1.LabelSelector{MatchLabels: map[string]string{"app": "source"}},
+				},
+				Dest: &securityv1alpha1.WorkloadRef{
+					Namespace: defaultCiliumTestNamespace,
+					OwnerName: "dest-deploy",
+					OwnerKind: securityv1alpha1.WorkloadKindDeployment,
+					Selector:  metav1.LabelSelector{MatchLabels: map[string]string{"app": "dest"}},
+				},
+				DstPort:  8080,
+				Protocol: corev1.ProtocolTCP,
+				Backend:  securityv1alpha1.PolicyBackendKubernetes,
+			}),
+		},
+		{
+			name: "missing_dst",
+			flow: flowResponse(&flowpb.Flow{
+				IsReply: wrapperspb.Bool(false),
+				L4:      &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
+				Source: &hubbleObserver.Endpoint{
+					Namespace: defaultCiliumTestNamespace,
+					Workloads: []*flowpb.Workload{{Name: "source-deploy", Kind: "Deployment"}},
+				},
+				Destination: &hubbleObserver.Endpoint{
+					Namespace: defaultCiliumTestNamespace,
+					Workloads: []*flowpb.Workload{{Name: "dest-deploy-not-present", Kind: "Deployment"}},
+				},
+			}),
+			processFlowResult: testProcessFlowOutcomeError(),
+		},
+		{
+			name:              "nil_flow_response",
+			flow:              nil,
+			processFlowResult: testProcessFlowOutcomeError(),
+		},
+		{
+			name:              "nil_payload_flow_response",
+			flow:              flowResponse(nil),
+			processFlowResult: testProcessFlowOutcomeError(),
+		},
+		{
+			name: "lost_events_is_skipped",
+			flow: &hubbleObserver.GetFlowsResponse{
+				ResponseTypes: &hubbleObserver.GetFlowsResponse_LostEvents{
+					LostEvents: &flowpb.LostEvent{NumEventsLost: 5},
+				},
+			},
+			processFlowResult: processFlowSkip(),
+		},
+		{
+			name: "node_status_is_skipped",
+			flow: &hubbleObserver.GetFlowsResponse{
+				ResponseTypes: &hubbleObserver.GetFlowsResponse_NodeStatus{
+					NodeStatus: &relay.NodeStatusEvent{},
+				},
+			},
+			processFlowResult: processFlowSkip(),
+		},
+		{
+			name:              "empty_response_type_is_skipped",
+			flow:              &hubbleObserver.GetFlowsResponse{},
+			processFlowResult: processFlowSkip(),
+		},
+	}
 
-		// Both source and dst workloads are in the cache.
-		result := s.processFlow(t.Context(), flowResponse(&flowpb.Flow{
-			IsReply: wrapperspb.Bool(false),
-			L4:      &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
-			Source: &hubbleObserver.Endpoint{
-				Namespace: defaultCiliumTestNamespace,
-				Workloads: []*flowpb.Workload{{Name: "source-deploy", Kind: "Deployment"}},
-			},
-			Destination: &hubbleObserver.Endpoint{
-				Namespace: defaultCiliumTestNamespace,
-				Workloads: []*flowpb.Workload{{Name: "dest-deploy", Kind: "Deployment"}},
-			},
-		}))
-		require.Equal(t, processFlowOutcomeEnqueue, result.outcome)
-		require.Equal(t, map[string]string{"app": "source"}, result.event.Source.Selector.MatchLabels)
-		require.Equal(t, map[string]string{"app": "dest"}, result.event.Dest.Selector.MatchLabels)
-	})
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("missing_dst", func(t *testing.T) {
-		t.Parallel()
-
-		// Both source and dst workloads are in the cache.
-		result := s.processFlow(t.Context(), flowResponse(&flowpb.Flow{
-			IsReply: wrapperspb.Bool(false),
-			L4:      &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
-			Source: &hubbleObserver.Endpoint{
-				Namespace: defaultCiliumTestNamespace,
-				Workloads: []*flowpb.Workload{{Name: "source-deploy", Kind: "Deployment"}},
-			},
-			Destination: &hubbleObserver.Endpoint{
-				Namespace: defaultCiliumTestNamespace,
-				Workloads: []*flowpb.Workload{{Name: "dest-deploy-not-present", Kind: "Deployment"}},
-			},
-		}))
-		require.Equal(t, processFlowOutcomeError, result.outcome)
-	})
+			result := s.processFlow(t.Context(), tc.flow)
+			require.Equal(t, tc.processFlowResult.outcome, result.outcome)
+			if tc.assert != nil {
+				tc.assert(t, result)
+			}
+		})
+	}
 }
