@@ -74,12 +74,14 @@ func TestMain(m *testing.M) {
 
 	// Optional dependencies, controlled by E2E_DEPENDENCIES.
 	// Default (empty/unset): both are installed. Set "none" to skip all.
-	if testSuiteConf.HasE2EDependency("istio") {
-		setupFuncs = append(setupFuncs, installProviderMesh())
+	if testSuiteConf.HasE2EDependency("provider") {
+		setupFuncs = append(setupFuncs, installProvider())
 	}
-	if testSuiteConf.HasE2EDependency("cert-manager") {
-		setupFuncs = append(setupFuncs, installCertManager())
-	}
+
+	// todo!: restore certManager when needed.
+	// if testSuiteConf.HasE2EDependency("cert-manager") {
+	// 	setupFuncs = append(setupFuncs, installCertManager())
+	// }
 
 	if testSuiteConf.installClusterOnly == "" {
 		// We install the network-enforcer and we destroy the cluster only in case we are running tests.
@@ -122,6 +124,7 @@ func installNetEnforcerChart() env.Func {
 			helm.WithArgs("--create-namespace"),
 			helm.WithArgs("--set", fmt.Sprintf("controller.image.repository=%s", controllerRepo)),
 			helm.WithArgs("--set", fmt.Sprintf("controller.image.tag=%s", controllerTag)),
+			helm.WithArgs("--set", fmt.Sprintf("controller.provider.name=%s", testCfg.ProviderName())),
 			helm.WithArgs("--set", fmt.Sprintf("controller.wnpStatusUpdateInterval=%s",
 				testCfg.wnpStatusUpdateInterval.String())),
 			helm.WithWait(),
@@ -146,20 +149,22 @@ func installNetEnforcerChart() env.Func {
 			return ctx, fmt.Errorf("wait network enforcer deployment ready: %w", err)
 		}
 
-		// the istio-fluent-bit DaemonSet tails ztunnel access logs and forwards
-		// them via OTLP to the controller's istio scraper (the learning source).
-		logger.InfoContext(ctx, "⏲️ waiting for istio fluent-bit")
-		if err = wait.For(
-			conditions.New(r).DaemonSetReady(
-				&appsv1.DaemonSet{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "network-enforcer-istio-fluent-bit",
-						Namespace: testCfg.releaseNS,
-					},
-				}),
-			wait.WithTimeout(defaultOperationTimeout),
-		); err != nil {
-			return ctx, fmt.Errorf("wait istio fluent-bit daemonset ready: %w", err)
+		if testCfg.IsIstioProvider() {
+			// the istio-fluent-bit DaemonSet tails ztunnel access logs and forwards
+			// them via OTLP to the controller's istio scraper (the learning source).
+			logger.InfoContext(ctx, "⏲️ waiting for istio fluent-bit")
+			if err = wait.For(
+				conditions.New(r).DaemonSetReady(
+					&appsv1.DaemonSet{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "network-enforcer-istio-fluent-bit",
+							Namespace: testCfg.releaseNS,
+						},
+					}),
+				wait.WithTimeout(defaultOperationTimeout),
+			); err != nil {
+				return ctx, fmt.Errorf("wait istio fluent-bit daemonset ready: %w", err)
+			}
 		}
 
 		return ctx, nil

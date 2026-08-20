@@ -1,10 +1,13 @@
 package e2e_test
 
 import (
+	"context"
 	"os"
 	"slices"
 	"strings"
 	"time"
+
+	netypes "github.com/rancher-sandbox/network-enforcer/internal/types"
 )
 
 const (
@@ -14,7 +17,8 @@ const (
 	defaultReleaseName             = "network-enforcer"
 	defaultReleaseNS               = "network-enforcer"
 	defaultNamespacePref           = "network-enforcer-e2e"
-	defaultKindConfigPath          = "./clusters/istio.yaml"
+	defaultKindConfigIstioPath     = "./clusters/istio.yaml"
+	defaultKindConfigNoCNIPath     = "./clusters/no-cni.yaml"
 	defaultWnpStatusUpdateInterval = 3 * time.Second // we reduce the time here to have faster feedback from the controller
 )
 
@@ -30,11 +34,17 @@ const (
 	useExistingClusterEnvVar = "E2E_USE_EXISTING_CLUSTER"
 	// selects the data-plane provider to set up (currently only "istio";
 	// calico and cilium will be added back as first-class providers).
-	providerEnvVar = "E2E_PROVIDER"
+	providerEnvVar        = "E2E_PROVIDER"
+	providerVersionEnvVar = "E2E_PROVIDER_VERSION"
 	// comma-separated list of optional dependencies to install: "istio", "cert-manager".
 	// Empty/unset means all. "none" means none.
 	e2eDependenciesEnvVar = "E2E_DEPENDENCIES"
 )
+
+type provider struct {
+	name    string
+	version string
+}
 
 type suiteConfig struct {
 	kindConfigPath          string
@@ -44,7 +54,7 @@ type suiteConfig struct {
 	releaseNS               string
 	controllerImage         string
 	namespacePrefix         string
-	provider                string
+	provider                provider
 	wnpStatusUpdateInterval time.Duration
 	installClusterOnly      string
 	useExistingCluster      bool
@@ -54,15 +64,20 @@ type suiteConfig struct {
 
 func loadSuiteConfig() suiteConfig {
 	dependencies := os.Getenv(e2eDependenciesEnvVar)
+	providerName := readEnvOrDefault(providerEnvVar, string(netypes.ProviderIstio))
 	return suiteConfig{
-		logsDir:                 defaultLogsDir,
-		chartPath:               defaultChartPath,
-		releaseName:             defaultReleaseName,
-		releaseNS:               defaultReleaseNS,
-		controllerImage:         defaultControllerImage,
-		namespacePrefix:         defaultNamespacePref,
-		kindConfigPath:          defaultKindConfigPath,
-		provider:                readEnvOrDefault(providerEnvVar, istioProvider),
+		logsDir:         defaultLogsDir,
+		chartPath:       defaultChartPath,
+		releaseName:     defaultReleaseName,
+		releaseNS:       defaultReleaseNS,
+		controllerImage: defaultControllerImage,
+		namespacePrefix: defaultNamespacePref,
+		kindConfigPath:  defaultKindConfigPathForProvider(providerName),
+		provider: provider{
+			name: providerName,
+			// we don't have a default value here, it will be set by provider specific code.
+			version: readEnvOrDefault(providerVersionEnvVar, ""),
+		},
 		wnpStatusUpdateInterval: defaultWnpStatusUpdateInterval,
 		installClusterOnly:      readEnvOrDefault(installClusterOnlyEnvVar, ""),
 		useExistingCluster:      readEnvOrDefault(useExistingClusterEnvVar, "") != "",
@@ -84,10 +99,32 @@ func readEnvOrDefault(name, defaultValue string) string {
 	return value
 }
 
+func defaultKindConfigPathForProvider(providerName string) string {
+	switch providerName {
+	case string(netypes.ProviderCilium), string(netypes.ProviderCalico):
+		return defaultKindConfigNoCNIPath
+	default:
+		return defaultKindConfigIstioPath
+	}
+}
+
+func (c suiteConfig) ProviderName() string {
+	return c.provider.name
+}
+
+func (c suiteConfig) IsIstioProvider() bool {
+	return c.ProviderName() == string(netypes.ProviderIstio)
+}
+
+func (c suiteConfig) IsKubernetesProvider() bool {
+	return c.ProviderName() == string(netypes.ProviderCilium) ||
+		c.ProviderName() == string(netypes.ProviderCalico)
+}
+
 // hasE2EDependency returns true if name is an active e2e dependency.
 // An empty E2E_DEPENDENCIES value means all dependencies are active.
 // The special value "none" disables all.
-func (c *suiteConfig) HasE2EDependency(name string) bool {
+func (c suiteConfig) HasE2EDependency(name string) bool {
 	if c.hasNoDependencies {
 		return false
 	}
@@ -96,4 +133,12 @@ func (c *suiteConfig) HasE2EDependency(name string) bool {
 		return true
 	}
 	return slices.Contains(c.dependencies, name)
+}
+
+func getCNIVersion(ctx context.Context, defaultVersion string) string {
+	cniVersion := getSuiteConfig(ctx).provider.version
+	if cniVersion != "" {
+		return cniVersion
+	}
+	return defaultVersion
 }

@@ -7,16 +7,10 @@ import (
 	"testing"
 	"time"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/e2e-framework/klient/k8s/resources"
-	"sigs.k8s.io/e2e-framework/klient/wait"
-	"sigs.k8s.io/e2e-framework/klient/wait/conditions"
-	"sigs.k8s.io/e2e-framework/pkg/env"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
-	"sigs.k8s.io/e2e-framework/third_party/helm"
 
 	"github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/stretchr/testify/require"
@@ -26,9 +20,6 @@ import (
 // the workloads created in it afterwards) in the Istio ambient mesh.
 const ambientNamespaceLabel = "istio.io/dataplane-mode"
 
-// istioProvider selects the Istio ambient data-plane provider.
-const istioProvider = "istio"
-
 // Istio ambient mesh install (official Istio Helm charts).
 const (
 	istioRepoURL       = "https://istio-release.storage.googleapis.com/charts"
@@ -36,138 +27,6 @@ const (
 	istioNamespace     = "istio-system"
 	istioChartVersion  = "1.30.3"
 )
-
-// istioChartInstall describes a single Helm chart that is part of the Istio
-// ambient mesh install.
-type istioChartInstall struct {
-	releaseName string
-	chart       string
-	args        []string
-}
-
-// installProviderMesh sets up the data-plane provider selected via
-// E2E_PROVIDER. Only the Istio provider is supported today; calico and cilium
-// will be added back as first-class providers.
-func installProviderMesh() env.Func {
-	return func(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
-		switch getSuiteConfig(ctx).provider {
-		case istioProvider:
-			return installIstioMesh()(ctx, cfg)
-		default:
-			return ctx, fmt.Errorf("unsupported provider: %q", getSuiteConfig(ctx).provider)
-		}
-	}
-}
-
-// installIstioMesh installs an Istio ambient mesh using the official Istio
-// Helm charts, in dependency order:
-//
-//  1. istio/base   — cluster-wide CRDs
-//  2. istio/istiod — control plane (pilot), with ambient and authz dry-run support
-//  3. istio/cni    — chained CNI node agent, required to redirect ambient
-//     workloads' traffic to the per-node ztunnel
-//  4. istio/ztunnel — node-level L4 proxy that produces the access logs
-//     network-enforcer consumes for learning/monitor/protect
-//
-// Each chart is installed with --wait so failures are attributable to a single
-// component. The version is pinned to match the setup validated in RFC 0004.
-func installIstioMesh() env.Func {
-	return func(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
-		manager := helm.New(cfg.KubeconfigFile())
-		if err := addLocalChartRepo(ctx, manager, istioRepoLocalName, istioRepoURL); err != nil {
-			return ctx, err
-		}
-
-		logger := getSetupLogger(ctx)
-		charts := []istioChartInstall{
-			{
-				releaseName: "istio-base",
-				chart:       istioRepoLocalName + "/base",
-				args: []string{
-					"--set", "defaultRevision=default",
-				},
-			},
-			{
-				releaseName: "istiod",
-				chart:       istioRepoLocalName + "/istiod",
-				args: []string{
-					"--set", "profile=ambient",
-					// observe monitor-mode (dry-run) authorization decisions in ztunnel logs
-					"--set", "pilot.env.AMBIENT_ENABLE_DRY_RUN_AUTHORIZATION_POLICY=true",
-				},
-			},
-			{
-				releaseName: "istio-cni",
-				chart:       istioRepoLocalName + "/cni",
-				args: []string{
-					"--set", "profile=ambient",
-				},
-			},
-			{
-				releaseName: "ztunnel",
-				chart:       istioRepoLocalName + "/ztunnel",
-				args: []string{
-					// surface monitor-mode policy decisions in ztunnel logs
-					"--set", "env.AUTHZ_POLICY_INFO_LOGGING=true",
-					// emit logs as JSON: the istio-fluent-bit pipeline (ztunnel_json
-					// parser + Lua) expects the flat dotted-key JSON format
-					"--set", "logAsJson=true",
-				},
-			},
-		}
-
-		for _, c := range charts {
-			opts := []helm.Option{
-				helm.WithName(c.releaseName),
-				helm.WithNamespace(istioNamespace),
-				helm.WithChart(c.chart),
-				helm.WithVersion(istioChartVersion),
-				helm.WithArgs("--create-namespace"),
-				helm.WithWait(),
-				helm.WithTimeout(defaultHelmTimeout.String()),
-			}
-			for _, arg := range c.args {
-				opts = append(opts, helm.WithArgs(arg))
-			}
-			logger.InfoContext(ctx, "🛠️ installing istio chart",
-				"release", c.releaseName, "chart", c.chart, "version", istioChartVersion)
-			if err := manager.RunInstall(opts...); err != nil {
-				return ctx, fmt.Errorf("install %s chart: %w", c.releaseName, err)
-			}
-		}
-
-		r, err := resources.New(cfg.Client().RESTConfig())
-		if err != nil {
-			return ctx, fmt.Errorf("create resources client: %w", err)
-		}
-
-		logger.InfoContext(ctx, "⏲️ waiting for istiod")
-		if err = wait.For(
-			conditions.New(r).DeploymentAvailable("istiod", istioNamespace),
-			wait.WithTimeout(defaultOperationTimeout),
-		); err != nil {
-			return ctx, fmt.Errorf("wait istiod deployment ready: %w", err)
-		}
-
-		// ztunnel and istio-cni run as DaemonSets. Every node must be ready
-		// before we deploy test workloads, otherwise a pod created before the
-		// CNI node agent is ready on its node would bypass the mesh entirely.
-		// (the istio-cni chart names its DaemonSet "istio-cni-node").
-		for _, dsName := range []string{"ztunnel", "istio-cni-node"} {
-			logger.InfoContext(ctx, "⏲️ waiting for "+dsName)
-			if err = wait.For(
-				conditions.New(r).DaemonSetReady(&appsv1.DaemonSet{
-					ObjectMeta: metav1.ObjectMeta{Name: dsName, Namespace: istioNamespace},
-				}),
-				wait.WithTimeout(defaultOperationTimeout),
-			); err != nil {
-				return ctx, fmt.Errorf("wait %s daemonset ready: %w", dsName, err)
-			}
-		}
-
-		return ctx, nil
-	}
-}
 
 // labelNamespaceAmbient enrolls the test namespace in the ambient mesh. It must
 // run before the test workloads are created: the istio-cni plugin decides, at
@@ -196,6 +55,10 @@ func labelNamespaceAmbient(ctx context.Context, t *testing.T, _ *envconf.Config)
 // the switch to protect mode (real enforcement, violating traffic blocked and
 // recorded as a violation).
 func TestIstioFlow(t *testing.T) {
+	if !loadSuiteConfig().IsIstioProvider() {
+		t.Skip("Skipping Istio flow test: selected provider is not istio")
+	}
+
 	feature := features.New("Istio ambient learning, monitor and protect").
 		Setup(setupTestNamespace).
 		Setup(labelNamespaceAmbient).
