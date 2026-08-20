@@ -14,8 +14,11 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
-var errEndpointHasNoWorkload = errors.New("endpoint has no associated workload")
-var errUnsupportedProtocol = errors.New("unsupported protocol")
+var (
+	errEndpointHasNoWorkload = errors.New("endpoint has no associated workload")
+	errUnsupportedProtocol   = errors.New("unsupported protocol")
+	errSkipWorkload          = errors.New("endpoint has no supported workload")
+)
 
 type processFlowOutcome int
 
@@ -203,30 +206,51 @@ func (s *CiliumScraper) processFlowResponse(
 		return parsed
 	}
 
-	for _, endpoint := range []*securityv1alpha1.WorkloadRef{parsed.event.Source, parsed.event.Dest} {
-		if endpoint.OwnerKind != securityv1alpha1.WorkloadKindPod {
-			if err := workload.LookupPodSelectorForWorkload(ctx, s.Client, endpoint); err != nil {
-				return processFlowError(fmt.Errorf("failed to lookup pod selector for workload %q: %w",
-					endpoint.OwnerName, err))
-			}
-			continue
-		}
-		resolved, err := workload.Get(ctx, s.Client, k8stypes.NamespacedName{
-			Namespace: endpoint.Namespace,
-			Name:      endpoint.OwnerName,
-		})
-		if err != nil {
-			return processFlowError(fmt.Errorf("failed to resolve pod %q to workload: %w", endpoint.OwnerName, err))
-		}
-		// it is possible that here we have still a pod as kind if the pod was a standalone pod
-		// in this case we skip.
-		if !resolved.IsSupported() {
-			return processFlowSkip()
-		}
-		*endpoint = resolved
+	if err := s.resolve(ctx, parsed.event.Source); err != nil {
+		return resolveOutcome("source", err)
 	}
-
+	if err := s.resolve(ctx, parsed.event.Dest); err != nil {
+		return resolveOutcome("destination", err)
+	}
 	return parsed
+}
+
+func resolveOutcome(role string, err error) processFlowResult {
+	if errors.Is(err, errSkipWorkload) {
+		return processFlowSkip()
+	}
+	return processFlowError(fmt.Errorf("cannot resolve %s workload: %w", role, err))
+}
+
+func (s *CiliumScraper) resolve(ctx context.Context, ref *securityv1alpha1.WorkloadRef) error {
+	if ref.OwnerKind == securityv1alpha1.WorkloadKindPod {
+		return s.resolvePod(ctx, ref)
+	}
+	return s.completeSelector(ctx, ref)
+}
+
+func (s *CiliumScraper) completeSelector(ctx context.Context, ref *securityv1alpha1.WorkloadRef) error {
+	if err := workload.LookupPodSelectorForWorkload(ctx, s.Client, ref); err != nil {
+		return fmt.Errorf("failed to lookup pod selector for workload %q: %w", ref.OwnerName, err)
+	}
+	return nil
+}
+
+func (s *CiliumScraper) resolvePod(ctx context.Context, ref *securityv1alpha1.WorkloadRef) error {
+	resolved, err := workload.Get(ctx, s.Client, k8stypes.NamespacedName{
+		Namespace: ref.Namespace,
+		Name:      ref.OwnerName,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to resolve pod %q to workload: %w", ref.OwnerName, err)
+	}
+	// it is possible that here we have still a pod as kind if the pod was a standalone pod
+	// in this case we skip.
+	if !resolved.IsSupported() {
+		return errSkipWorkload
+	}
+	*ref = resolved
+	return nil
 }
 
 func (s *CiliumScraper) processFlow(
