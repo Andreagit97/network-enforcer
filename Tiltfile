@@ -15,12 +15,18 @@ namespace_create(release_namespace)
 
 controller_image = settings.get("controller").get("image")
 
+# allow the override of the provider from command line
+config.define_string("provider")
+cfg = config.parse()
+providerName = cfg.get("provider") or settings.get("controller").get("providerName")
+
 # Prepare Helm set values based on CNI type
 helm_set_values = [
     "controller.image.repository=" + controller_image,
     "controller.replicas=1",
     "controller.containerSecurityContext.runAsUser=null",
     "controller.podSecurityContext.runAsNonRoot=false",
+	"controller.provider.name=" + providerName,
 ]
 
 yaml = helm(

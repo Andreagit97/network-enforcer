@@ -112,6 +112,7 @@
 		"printcolumn",
 		"deepcopy",
 		"loglevel",
+		"testutil",
     ],
     "import": []
 }

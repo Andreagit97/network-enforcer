@@ -59,14 +59,6 @@ const (
 	otlpLogShutdownTimeout = 10 * time.Second
 )
 
-type provider string
-
-const (
-	providerIstio  provider = "istio"
-	providerCilium provider = "cilium"
-	providerCalico provider = "calico"
-)
-
 type otelConf struct {
 	Endpoint   string
 	Protocol   string
@@ -108,10 +100,10 @@ func setupProviderScraper(
 	violationBuffer *violation.Buffer,
 	eventLogger otellog.Logger,
 ) error {
-	providerName := provider(conf.provider.name)
+	providerName := types.Provider(conf.provider.name)
 	logger.InfoContext(ctx, "Configuring scraper", "provider", providerName)
 	switch providerName {
-	case providerIstio:
+	case types.ProviderIstio:
 		otelPort, err := strconv.Atoi(conf.provider.endpoint)
 		if err != nil {
 			return fmt.Errorf("istio provider: invalid OTEL port %q: %w", conf.provider.endpoint, err)
@@ -128,7 +120,18 @@ func setupProviderScraper(
 			return fmt.Errorf("unable to add istio scraper to manager: %w", err)
 		}
 		return nil
-	case providerCilium, providerCalico:
+	case types.ProviderCilium:
+		ciliumScraper := scraper.NewCiliumScraper(scraper.CiliumScraperConfig{
+			Client:               mgr.GetClient(),
+			Logger:               logger.With("component", "cilium-scraper"),
+			Endpoint:             conf.provider.endpoint,
+			EnqueueLearningEvent: learningEnqueueFunc,
+		})
+		if err := mgr.Add(ciliumScraper); err != nil {
+			return fmt.Errorf("unable to add cilium scraper to manager: %w", err)
+		}
+		return nil
+	case types.ProviderCalico:
 		fallthrough
 	default:
 		return fmt.Errorf("unsupported provider %q", conf.provider.name)
