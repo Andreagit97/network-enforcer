@@ -78,10 +78,9 @@ func TestMain(m *testing.M) {
 		setupFuncs = append(setupFuncs, installProvider())
 	}
 
-	// todo!: restore certManager when needed.
-	// if testSuiteConf.HasE2EDependency("cert-manager") {
-	// 	setupFuncs = append(setupFuncs, installCertManager())
-	// }
+	if testSuiteConf.HasE2EDependency("cert-manager") {
+		setupFuncs = append(setupFuncs, installCertManager())
+	}
 
 	if testSuiteConf.installClusterOnly == "" {
 		// We install the network-enforcer and we destroy the cluster only in case we are running tests.
