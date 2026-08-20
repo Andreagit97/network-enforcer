@@ -32,12 +32,12 @@ const (
 	installClusterOnlyEnvVar = "E2E_INSTALL_CLUSTER_ONLY"
 	// set to "true" to skip cluster creation, image loading, and cluster destroy.
 	useExistingClusterEnvVar = "E2E_USE_EXISTING_CLUSTER"
-	// selects the data-plane provider to set up (currently only "istio";
-	// calico and cilium will be added back as first-class providers).
+	// selects the data-plane provider to set up (istio, cilium or calico).
 	providerEnvVar        = "E2E_PROVIDER"
 	providerVersionEnvVar = "E2E_PROVIDER_VERSION"
-	// comma-separated list of optional dependencies to install: "istio", "cert-manager".
-	// Empty/unset means all. "none" means none.
+	// comma-separated list of optional dependencies to install: provider name
+	// ("istio", "cilium", "calico") and "cert-manager". Empty/unset means all.
+	// "none" means none.
 	e2eDependenciesEnvVar = "E2E_DEPENDENCIES"
 )
 

@@ -2,12 +2,9 @@ package scraper
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"time"
 
-	retry "github.com/avast/retry-go/v4"
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	hubbleObserver "github.com/cilium/cilium/api/v1/observer"
 	"google.golang.org/grpc"
@@ -49,61 +46,7 @@ func (s *CiliumScraper) newHubbleClient() (hubbleObserver.ObserverClient, *grpc.
 
 func (s *CiliumScraper) Start(ctx context.Context) error {
 	s.Logger.InfoContext(ctx, "Starting Cilium scraper")
-
-	const (
-		ciliumReconnectMinBackoff         = 1 * time.Second
-		ciliumReconnectMaxBackoff         = 30 * time.Second
-		ciliumMaxConsecutiveFailures uint = 5
-	)
-
-	isContextCancellation := func(err error) bool {
-		return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-	}
-
-	for {
-		successfulConnection := false
-		err := retry.Do(
-			func() error {
-				return s.stream(ctx, &successfulConnection)
-			},
-			retry.Context(ctx),
-			retry.Attempts(ciliumMaxConsecutiveFailures),
-			retry.Delay(ciliumReconnectMinBackoff),
-			retry.DelayType(retry.BackOffDelay),
-			retry.MaxDelay(ciliumReconnectMaxBackoff),
-			retry.RetryIf(func(err error) bool {
-				if isContextCancellation(err) ||
-					successfulConnection {
-					// every time we stop a successful stream, we will do a fresh retry.
-					return false
-				}
-				return true
-			}),
-			retry.OnRetry(func(n uint, retryErr error) {
-				s.Logger.WarnContext(ctx, "Cilium scraper stream failed before processing flows, retrying",
-					"attempt", n+1,
-					"maxAttempts", ciliumMaxConsecutiveFailures,
-					"error", retryErr,
-				)
-			}),
-		)
-
-		if isContextCancellation(err) || ctx.Err() != nil {
-			s.Logger.InfoContext(ctx, "Cilium scraper shutting down due to context cancel")
-			//nolint:nilerr // ignore context cancellation errors
-			return nil
-		}
-
-		if !successfulConnection {
-			return fmt.Errorf("cilium scraper stopped after %d consecutive failures: %w",
-				ciliumMaxConsecutiveFailures, err)
-		}
-		// if we have a failure after a success we just retry again waiting a min backoff
-		s.Logger.WarnContext(ctx, "Cilium scraper stream connection was interrupted, retrying",
-			"error", err,
-		)
-		time.Sleep(ciliumReconnectMinBackoff)
-	}
+	return runStreamWithReconnect(ctx, s.Logger, "Cilium", s.stream)
 }
 
 func (s *CiliumScraper) stream(ctx context.Context, successfulConnection *bool) error {

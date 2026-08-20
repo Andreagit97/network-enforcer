@@ -70,8 +70,18 @@ spec:
           | nindent 10 }}
         volumeMounts:
         {{- include "network-enforcer.otel.config.volumeMounts" . | indent 8 }}
+        {{- if eq .Values.controller.provider.name "calico" }}
+        - name: goldmane-certs
+          mountPath: {{ include "network-enforcer.goldmane.certDir" . }}
+          readOnly: true
+        {{- end }}
       volumes:
       {{- include "network-enforcer.otel.config.volumes" . | indent 6 }}
+      {{- if eq .Values.controller.provider.name "calico" }}
+      - name: goldmane-certs
+        secret:
+          secretName: net-enf-goldmane-client-certs
+      {{- end }}
       securityContext: {{- toYaml .Values.controller.podSecurityContext | nindent
         8 }}
       {{- with .Values.controller.tolerations }}

@@ -14,38 +14,6 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
-var (
-	errEndpointHasNoWorkload = errors.New("endpoint has no associated workload")
-	errUnsupportedProtocol   = errors.New("unsupported protocol")
-	errSkipWorkload          = errors.New("endpoint has no supported workload")
-)
-
-type processFlowOutcome int
-
-const (
-	processFlowOutcomeSkip processFlowOutcome = iota
-	processFlowOutcomeEnqueue
-	processFlowOutcomeError
-)
-
-type processFlowResult struct {
-	outcome processFlowOutcome
-	event   types.LearningEvent
-	err     error
-}
-
-func processFlowSkip() processFlowResult {
-	return processFlowResult{outcome: processFlowOutcomeSkip}
-}
-
-func processFlowEnqueue(event types.LearningEvent) processFlowResult {
-	return processFlowResult{outcome: processFlowOutcomeEnqueue, event: event}
-}
-
-func processFlowError(err error) processFlowResult {
-	return processFlowResult{outcome: processFlowOutcomeError, err: err}
-}
-
 func convertCiliumKindToSecurityWorkloadKind(kind string) securityv1alpha1.WorkloadKind {
 	// Today Cilium is following the same naming we use ("Deployment", "StatefulSet", "DaemonSet")
 	// so no need of extra conversion for types.
@@ -197,43 +165,11 @@ func parseCiliumFlowResponse(flow *flowpb.Flow) processFlowResult {
 	})
 }
 
-func (s *CiliumScraper) processFlowResponse(
-	ctx context.Context,
-	flow *flowpb.Flow,
-) processFlowResult {
-	parsed := parseCiliumFlowResponse(flow)
-	if parsed.outcome != processFlowOutcomeEnqueue {
-		return parsed
-	}
-
-	if err := s.resolve(ctx, parsed.event.Source); err != nil {
-		return resolveOutcome("source", err)
-	}
-	if err := s.resolve(ctx, parsed.event.Dest); err != nil {
-		return resolveOutcome("destination", err)
-	}
-	return parsed
-}
-
-func resolveOutcome(role string, err error) processFlowResult {
-	if errors.Is(err, errSkipWorkload) {
-		return processFlowSkip()
-	}
-	return processFlowError(fmt.Errorf("cannot resolve %s workload: %w", role, err))
-}
-
 func (s *CiliumScraper) resolve(ctx context.Context, ref *securityv1alpha1.WorkloadRef) error {
 	if ref.OwnerKind == securityv1alpha1.WorkloadKindPod {
 		return s.resolvePod(ctx, ref)
 	}
-	return s.completeSelector(ctx, ref)
-}
-
-func (s *CiliumScraper) completeSelector(ctx context.Context, ref *securityv1alpha1.WorkloadRef) error {
-	if err := workload.LookupPodSelectorForWorkload(ctx, s.Client, ref); err != nil {
-		return fmt.Errorf("failed to lookup pod selector for workload %q: %w", ref.OwnerName, err)
-	}
-	return nil
+	return completeSelector(ctx, s.Client, ref)
 }
 
 func (s *CiliumScraper) resolvePod(ctx context.Context, ref *securityv1alpha1.WorkloadRef) error {
@@ -267,7 +203,7 @@ func (s *CiliumScraper) processFlow(
 		if flowResponse == nil {
 			return processFlowError(errors.New("found nil response flow"))
 		}
-		return s.processFlowResponse(ctx, flowResponse)
+		return resolveParsedFlow(ctx, s.resolve, parseCiliumFlowResponse(flowResponse))
 	case *hubbleObserver.GetFlowsResponse_LostEvents:
 		flowLost := flow.GetLostEvents()
 		if flowLost == nil {

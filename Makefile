@@ -144,6 +144,8 @@ $(LOCALBIN):
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+PROTOC_GEN_GO ?= $(LOCALBIN)/protoc-gen-go
+PROTOC_GEN_GO_GRPC ?= $(LOCALBIN)/protoc-gen-go-grpc
 HELM_VALUES_SCHEMA_JSON ?= $(LOCALBIN)/helm-values-schema-json
 
 ## Tool Versions
@@ -180,6 +182,16 @@ setup-envtest: envtest ## Download the binaries required for ENVTEST in the loca
 envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+
+.PHONY: protoc-gen-go
+protoc-gen-go: $(PROTOC_GEN_GO)
+$(PROTOC_GEN_GO): | $(LOCALBIN)
+	$(call go-install-tool,$(PROTOC_GEN_GO),google.golang.org/protobuf/cmd/protoc-gen-go,$(PROTOC_GEN_GO_VERSION))
+
+.PHONY: protoc-gen-go-grpc
+protoc-gen-go-grpc: $(PROTOC_GEN_GO_GRPC)
+$(PROTOC_GEN_GO_GRPC): | $(LOCALBIN)
+	$(call go-install-tool,$(PROTOC_GEN_GO_GRPC),google.golang.org/grpc/cmd/protoc-gen-go-grpc,$(PROTOC_GEN_GO_GRPC_VERSION))
 
 .PHONY: helm-values-schema-json
 helm-values-schema-json: $(HELM_VALUES_SCHEMA_JSON) ## Download helm-values-schema-json locally if necessary.
@@ -222,10 +234,25 @@ define gomodver
 $(shell go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' $(1) 2>/dev/null)
 endef
 
+GOLDMANE_VERSION ?= v3.32.1
+GOLDMANE_PROTO_DIR = internal/scraper/goldmane
+.PHONY: download-calico-goldmane-proto
+download-calico-goldmane-proto: ## Download Calico Goldmane proto file.
+	@echo "Downloading Goldmane proto file..."
+	mkdir -p $(GOLDMANE_PROTO_DIR)
+	curl -fsSL https://raw.githubusercontent.com/projectcalico/calico/$(GOLDMANE_VERSION)/goldmane/proto/api.proto -o $(GOLDMANE_PROTO_DIR)/api.proto
+
+.PHONY: generate-calico-goldmane-proto
+generate-calico-goldmane-proto: download-calico-goldmane-proto protoc-gen-go protoc-gen-go-grpc ## Generate Go code from Goldmane proto definitions.
+	@echo "Generating Go code from Goldmane proto definitions..."
+	PATH=$(LOCALBIN):$(PATH) protoc --go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		$(GOLDMANE_PROTO_DIR)/api.proto
+
 # The e2e suite installs the selected data-plane provider (default: istio) and
 # the network-enforcer chart on a dedicated kind cluster.
 #
-# Use `E2E_PROVIDER` env variable to select the provider (currently only `istio`).
+# Use `E2E_PROVIDER` env variable to select the provider (`istio`, `cilium`, or `calico`).
 # Example: `make test-e2e E2E_PROVIDER=istio`
 #
 # Set E2E_USE_EXISTING_CLUSTER=true to reuse an existing cluster.
