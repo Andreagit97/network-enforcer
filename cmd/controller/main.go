@@ -245,7 +245,7 @@ func run(logger *slog.Logger, conf *config) error {
 	// Create the violation ring buffer shared
 	violationBuffer := violation.NewBuffer()
 
-	learningReconciler := controller.NewLearningReconciler(mgr.GetClient())
+	learningReconciler := controller.NewLearningReconciler(mgr.GetClient(), violationBuffer)
 	if err = learningReconciler.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create learning reconciler: %w", err)
 	}
