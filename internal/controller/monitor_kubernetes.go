@@ -105,10 +105,12 @@ func generateViolationObservation(
 
 	observation := violation.Observation{
 		ViolationInfo: securityv1alpha1.ViolationInfo{
-			Timestamp:              metav1.NewTime(time.Now()),
-			Source:                 source,
-			Dest:                   dest,
-			Protocol:               protocol,
+			Timestamp: metav1.NewTime(time.Now()),
+			Source:    source,
+			Dest:      dest,
+			Protocol:  protocol,
+			// todo!: the real fix here is to turn all the `dstPort` reference into int32.
+			//nolint:gosec // dstPort is always in the range 0 - 65536
 			DstPort:                int32(dstPort),
 			Action:                 securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
 			DenyingPolicyNamespace: workload.Namespace,

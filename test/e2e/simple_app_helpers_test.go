@@ -170,8 +170,6 @@ func execInSimpleClientDeploymentRaw(
 
 // assertPacketSentFromClient sends a payload to the simple app service on the
 // given port and asserts the echo comes back (traffic allowed).
-//
-//nolint:unparam // for now we just use tcp protocol
 func assertPacketSentFromClient(
 	ctx context.Context,
 	t *testing.T,
