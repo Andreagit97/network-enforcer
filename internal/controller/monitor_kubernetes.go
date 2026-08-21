@@ -23,11 +23,11 @@ func (r *LearningReconciler) evaluateMonitorViolation(
 	spec := policy.Spec.Kubernetes
 	switch direction {
 	case networkingv1.PolicyTypeEgress:
-		if !containsEgressPeerPort(spec.Egress, policyPeer, policyPort) {
+		if !containsPeerPort(spec.Egress, policyPeer, policyPort) {
 			return r.sendMonitorViolation(policy.Name, workload, peer, protocol, direction, dstPort)
 		}
 	case networkingv1.PolicyTypeIngress:
-		if !containsIngressPeerPort(spec.Ingress, policyPeer, policyPort) {
+		if !containsPeerPort(spec.Ingress, policyPeer, policyPort) {
 			return r.sendMonitorViolation(policy.Name, workload, peer, protocol, direction, dstPort)
 		}
 	default:
@@ -36,35 +36,32 @@ func (r *LearningReconciler) evaluateMonitorViolation(
 	return nil
 }
 
-func containsEgressPeerPort(
-	rules []networkingv1.NetworkPolicyEgressRule,
+type peerPortRule interface {
+	networkingv1.NetworkPolicyEgressRule | networkingv1.NetworkPolicyIngressRule
+}
+
+func containsPeerPort[T peerPortRule](
+	rules []T,
 	peer networkingv1.NetworkPolicyPeer,
 	port networkingv1.NetworkPolicyPort,
 ) bool {
-	for _, rule := range rules {
-		if len(rule.To) != 1 || !securityv1alpha1.PolicyPeerEqual(rule.To[0], peer) {
-			continue
-		}
-		for _, existingPort := range rule.Ports {
-			if securityv1alpha1.PolicyPortEqual(existingPort, port) {
-				return true
-			}
+	peerAndPorts := func(rule T) ([]networkingv1.NetworkPolicyPeer, []networkingv1.NetworkPolicyPort) {
+		switch r := any(rule).(type) {
+		case networkingv1.NetworkPolicyEgressRule:
+			return r.To, r.Ports
+		case networkingv1.NetworkPolicyIngressRule:
+			return r.From, r.Ports
+		default:
+			return nil, nil
 		}
 	}
 
-	return false
-}
-
-func containsIngressPeerPort(
-	rules []networkingv1.NetworkPolicyIngressRule,
-	peer networkingv1.NetworkPolicyPeer,
-	port networkingv1.NetworkPolicyPort,
-) bool {
 	for _, rule := range rules {
-		if len(rule.From) != 1 || !securityv1alpha1.PolicyPeerEqual(rule.From[0], peer) {
+		rulePeers, rulePorts := peerAndPorts(rule)
+		if len(rulePeers) != 1 || !securityv1alpha1.PolicyPeerEqual(rulePeers[0], peer) {
 			continue
 		}
-		for _, existingPort := range rule.Ports {
+		for _, existingPort := range rulePorts {
 			if securityv1alpha1.PolicyPortEqual(existingPort, port) {
 				return true
 			}
