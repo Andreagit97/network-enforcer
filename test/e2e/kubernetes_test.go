@@ -88,7 +88,9 @@ func assessKubernetesProposalGenerated(ctx context.Context, t *testing.T, _ *env
 	// todo!: use corev1 default value
 	const namespaceLabelKey = "kubernetes.io/metadata.name"
 	tcpProtocol := corev1.ProtocolTCP
+	udpProtocol := corev1.ProtocolUDP
 	dstPort := intstr.FromInt32(simpleAppTCPServicePort)
+	dnsPort := intstr.FromInt32(53)
 
 	expectedClientEgressProposal := securityv1alpha1.WorkloadNetworkPolicyProposal{
 		ObjectMeta: metav1.ObjectMeta{
@@ -122,41 +124,24 @@ func assessKubernetesProposalGenerated(ctx context.Context, t *testing.T, _ *env
 								},
 							},
 						},
-						// todo!: hubble is not able to resolve the coredns deployment from the pod:
-						// "destination": {
-						// 	"identity": 24995,
-						// 	"cluster_name": "default",
-						// 	"namespace": "kube-system",
-						// 	"labels": [
-						// 		"k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=kube-system",
-						// 		"k8s:io.cilium.k8s.policy.cluster=default",
-						// 		"k8s:io.cilium.k8s.policy.serviceaccount=coredns",
-						// 		"k8s:io.kubernetes.pod.namespace=kube-system",
-						// 		"k8s:k8s-app=kube-dns"
-						// 	],
-						// 	"pod_name": "coredns-7d764666f9-hjbxq"
-						// },
-						//
-						// we need an additional logic to get the workload starting from the pod name
-						//
-						// {
-						// 	Ports: []networkingv1.NetworkPolicyPort{
-						// 		{
-						// 			Port:     &dnsPort,
-						// 			Protocol: &udpProtocol,
-						// 		},
-						// 	},
-						// 	To: []networkingv1.NetworkPolicyPeer{
-						// 		{
-						// 			NamespaceSelector: &metav1.LabelSelector{
-						// 				MatchLabels: map[string]string{namespaceLabelKey: "kube-system"},
-						// 			},
-						// 			PodSelector: &metav1.LabelSelector{
-						// 				MatchLabels: map[string]string{"k8s-app": "kube-dns"},
-						// 			},
-						// 		},
-						// 	},
-						// },
+						{
+							Ports: []networkingv1.NetworkPolicyPort{
+								{
+									Port:     &dnsPort,
+									Protocol: &udpProtocol,
+								},
+							},
+							To: []networkingv1.NetworkPolicyPeer{
+								{
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{namespaceLabelKey: "kube-system"},
+									},
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"k8s-app": "kube-dns"},
+									},
+								},
+							},
+						},
 					},
 				},
 			},

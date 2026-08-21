@@ -11,10 +11,14 @@ import (
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	"github.com/rancher-sandbox/network-enforcer/internal/workload"
 	corev1 "k8s.io/api/core/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
-var errEndpointHasNoWorkload = errors.New("endpoint has no associated workload")
-var errUnsupportedProtocol = errors.New("unsupported protocol")
+var (
+	errEndpointHasNoWorkload = errors.New("endpoint has no associated workload")
+	errUnsupportedProtocol   = errors.New("unsupported protocol")
+	errSkipWorkload          = errors.New("endpoint has no supported workload")
+)
 
 type processFlowOutcome int
 
@@ -48,18 +52,50 @@ func convertCiliumKindToSecurityWorkloadKind(kind string) securityv1alpha1.Workl
 	return securityv1alpha1.WorkloadKind(kind)
 }
 
+func handleNoWorkload(endpoint *hubbleObserver.Endpoint) (*securityv1alpha1.WorkloadRef, error) {
+	// Here we have 2 possible cases
+	// 1. the endpoint is a pod but hubble is not able to resolve the workload.
+	// 2. the endpoint is not a pod but the local node.
+	if endpoint.GetPodName() != "" {
+		// This is an example where the pod is part of a deployment
+		// but hubble is not able to resolve it. We return the pod here as
+		// workload and we will try the resolution later.
+		//
+		// "destination": {
+		// 	"identity": 24995,
+		// 	"cluster_name": "default",
+		// 	"namespace": "kube-system",
+		// 	"labels": [
+		// 		"k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=kube-system",
+		// 		"k8s:io.cilium.k8s.policy.cluster=default",
+		// 		"k8s:io.cilium.k8s.policy.serviceaccount=coredns",
+		// 		"k8s:io.kubernetes.pod.namespace=kube-system",
+		// 		"k8s:k8s-app=kube-dns"
+		// 	],
+		// 	"pod_name": "coredns-7d764666f9-hjbxq"
+		// },
+		return &securityv1alpha1.WorkloadRef{
+			Namespace: endpoint.GetNamespace(),
+			OwnerName: endpoint.GetPodName(),
+			OwnerKind: securityv1alpha1.WorkloadKindPod,
+		}, nil
+	}
+
+	// in case of host connections or connections to the api server we usually don't have a workload associated.
+	// For now we will skip those cases.
+	// Examples:
+	// "source":{"identity":1,"labels":["reserved:host"]}
+	// "source":{"identity":1,"labels":["reserved:host","reserved:kube-apiserver"]}
+	return nil, errEndpointHasNoWorkload
+}
+
 func fromEndpointToWorkloadRef(endpoint *hubbleObserver.Endpoint) (*securityv1alpha1.WorkloadRef, error) {
 	if endpoint == nil {
 		return nil, errors.New("endpoint is nil")
 	}
 
 	if len(endpoint.GetWorkloads()) == 0 {
-		// in case of host connections or connections to the api server we usually don't have a workload associated.
-		// For now we will skip those cases.
-		// Examples:
-		// "source":{"identity":1,"labels":["reserved:host"]}
-		// "source":{"identity":1,"labels":["reserved:host","reserved:kube-apiserver"]}
-		return nil, errEndpointHasNoWorkload
+		return handleNoWorkload(endpoint)
 	}
 
 	if len(endpoint.GetWorkloads()) > 1 {
@@ -112,21 +148,17 @@ func extractPortAndProtocol(flowInfo *flowpb.Flow) (uint32, corev1.Protocol, err
 	return dstPort, proto, nil
 }
 
-func parseCiliumFlow(flow *hubbleObserver.GetFlowsResponse) processFlowResult {
-	if flow == nil {
-		return processFlowError(errors.New("found nil flow response"))
-	}
+func shouldSkipWorkload(workload *securityv1alpha1.WorkloadRef) bool {
+	// we keep also pods here because we will handle them later
+	return !workload.IsSupported() && workload.OwnerKind != securityv1alpha1.WorkloadKindPod
+}
 
-	flowInfo := flow.GetFlow()
-	if flowInfo == nil {
-		return processFlowError(errors.New("found empty flow"))
-	}
-
-	if discardFlow(flowInfo) {
+func parseCiliumFlowResponse(flow *flowpb.Flow) processFlowResult {
+	if discardFlow(flow) {
 		return processFlowSkip()
 	}
 
-	dstPort, proto, err := extractPortAndProtocol(flowInfo)
+	dstPort, proto, err := extractPortAndProtocol(flow)
 	if err != nil {
 		if errors.Is(err, errUnsupportedProtocol) {
 			return processFlowSkip()
@@ -134,25 +166,25 @@ func parseCiliumFlow(flow *hubbleObserver.GetFlowsResponse) processFlowResult {
 		return processFlowError(err)
 	}
 
-	sourceWorkload, err := fromEndpointToWorkloadRef(flowInfo.GetSource())
+	sourceWorkload, err := fromEndpointToWorkloadRef(flow.GetSource())
 	if err != nil {
 		if errors.Is(err, errEndpointHasNoWorkload) {
 			return processFlowSkip()
 		}
 		return processFlowError(fmt.Errorf("cannot get source workload: %w", err))
 	}
-	if !sourceWorkload.IsSupported() {
+	if shouldSkipWorkload(sourceWorkload) {
 		return processFlowSkip()
 	}
 
-	destWorkload, err := fromEndpointToWorkloadRef(flowInfo.GetDestination())
+	destWorkload, err := fromEndpointToWorkloadRef(flow.GetDestination())
 	if err != nil {
 		if errors.Is(err, errEndpointHasNoWorkload) {
 			return processFlowSkip()
 		}
 		return processFlowError(fmt.Errorf("cannot get destination workload: %w", err))
 	}
-	if !destWorkload.IsSupported() {
+	if shouldSkipWorkload(destWorkload) {
 		return processFlowSkip()
 	}
 
@@ -165,26 +197,90 @@ func parseCiliumFlow(flow *hubbleObserver.GetFlowsResponse) processFlowResult {
 	})
 }
 
-func (s *CiliumScraper) processFlow(
+func (s *CiliumScraper) processFlowResponse(
 	ctx context.Context,
-	flow *hubbleObserver.GetFlowsResponse,
+	flow *flowpb.Flow,
 ) processFlowResult {
-	parsed := parseCiliumFlow(flow)
+	parsed := parseCiliumFlowResponse(flow)
 	if parsed.outcome != processFlowOutcomeEnqueue {
 		return parsed
 	}
 
-	if s.Client == nil {
-		return processFlowError(errors.New("kubernetes client is not configured"))
+	if err := s.resolve(ctx, parsed.event.Source); err != nil {
+		return resolveOutcome("source", err)
 	}
-
-	if err := workload.LookupPodSelectorForWorkload(ctx, s.Client, parsed.event.Source); err != nil {
-		return processFlowError(fmt.Errorf("failed to lookup pod selector for source workload: %w", err))
+	if err := s.resolve(ctx, parsed.event.Dest); err != nil {
+		return resolveOutcome("destination", err)
 	}
-
-	if err := workload.LookupPodSelectorForWorkload(ctx, s.Client, parsed.event.Dest); err != nil {
-		return processFlowError(fmt.Errorf("failed to lookup pod selector for destination workload: %w", err))
-	}
-
 	return parsed
+}
+
+func resolveOutcome(role string, err error) processFlowResult {
+	if errors.Is(err, errSkipWorkload) {
+		return processFlowSkip()
+	}
+	return processFlowError(fmt.Errorf("cannot resolve %s workload: %w", role, err))
+}
+
+func (s *CiliumScraper) resolve(ctx context.Context, ref *securityv1alpha1.WorkloadRef) error {
+	if ref.OwnerKind == securityv1alpha1.WorkloadKindPod {
+		return s.resolvePod(ctx, ref)
+	}
+	return s.completeSelector(ctx, ref)
+}
+
+func (s *CiliumScraper) completeSelector(ctx context.Context, ref *securityv1alpha1.WorkloadRef) error {
+	if err := workload.LookupPodSelectorForWorkload(ctx, s.Client, ref); err != nil {
+		return fmt.Errorf("failed to lookup pod selector for workload %q: %w", ref.OwnerName, err)
+	}
+	return nil
+}
+
+func (s *CiliumScraper) resolvePod(ctx context.Context, ref *securityv1alpha1.WorkloadRef) error {
+	resolved, err := workload.Get(ctx, s.Client, k8stypes.NamespacedName{
+		Namespace: ref.Namespace,
+		Name:      ref.OwnerName,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to resolve pod %q to workload: %w", ref.OwnerName, err)
+	}
+	// it is possible that here we have still a pod as kind if the pod was a standalone pod
+	// in this case we skip.
+	if !resolved.IsSupported() {
+		return errSkipWorkload
+	}
+	*ref = resolved
+	return nil
+}
+
+func (s *CiliumScraper) processFlow(
+	ctx context.Context,
+	flow *hubbleObserver.GetFlowsResponse,
+) processFlowResult {
+	if flow == nil {
+		return processFlowError(errors.New("found nil flow"))
+	}
+
+	switch flow.GetResponseTypes().(type) {
+	case *hubbleObserver.GetFlowsResponse_Flow:
+		flowResponse := flow.GetFlow()
+		if flowResponse == nil {
+			return processFlowError(errors.New("found nil response flow"))
+		}
+		return s.processFlowResponse(ctx, flowResponse)
+	case *hubbleObserver.GetFlowsResponse_LostEvents:
+		flowLost := flow.GetLostEvents()
+		if flowLost == nil {
+			return processFlowError(errors.New("found nil flow lost event"))
+		}
+		s.Logger.WarnContext(ctx, "Hubble lost events",
+			"count", flowLost.GetNumEventsLost(),
+			"source", flowLost.GetSource(),
+		)
+		return processFlowSkip()
+	case *hubbleObserver.GetFlowsResponse_NodeStatus:
+		return processFlowSkip()
+	default:
+		return processFlowSkip()
+	}
 }
