@@ -18,6 +18,8 @@ func installProvider() env.Func {
 			return installIstioMesh()(ctx, cfg)
 		case string(netypes.ProviderCilium):
 			return installCilium(ctx, cfg)
+		case string(netypes.ProviderCalico):
+			return installCalico(ctx, cfg)
 		default:
 			return ctx, fmt.Errorf("unsupported provider: %q", getSuiteConfig(ctx).ProviderName())
 		}

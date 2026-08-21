@@ -132,7 +132,16 @@ func setupProviderScraper(
 		}
 		return nil
 	case types.ProviderCalico:
-		fallthrough
+		calicoScraper := scraper.NewCalicoScraper(scraper.CalicoScraperConfig{
+			Endpoint:             conf.provider.endpoint,
+			EnqueueLearningEvent: learningEnqueueFunc,
+			Logger:               logger.With("component", "calico-scraper"),
+			Client:               mgr.GetClient(),
+		})
+		if err := mgr.Add(calicoScraper); err != nil {
+			return fmt.Errorf("unable to add calico scraper to manager: %w", err)
+		}
+		return nil
 	default:
 		return fmt.Errorf("unsupported provider %q", conf.provider.name)
 	}

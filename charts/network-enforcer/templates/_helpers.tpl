@@ -98,6 +98,13 @@ Accepts configured int/string or provider default from helper.
 {{- end -}}
 
 {{/*
+Directory where Goldmane mTLS material is mounted in the controller.
+*/}}
+{{- define "network-enforcer.goldmane.certDir" -}}
+/etc/goldmane/certs
+{{- end -}}
+
+{{/*
 Certificate directory for the shipped OTel collector's own (server-side) mTLS
 keys, mounted via cert-manager CSI.
 */}}
