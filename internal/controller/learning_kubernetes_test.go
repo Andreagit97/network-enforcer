@@ -17,6 +17,7 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	netypes "github.com/rancher-sandbox/network-enforcer/internal/types"
+	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 )
 
 func newTestLearningReconciler(t *testing.T, objs []client.Object) *LearningReconciler {
@@ -31,12 +32,15 @@ func newTestLearningReconciler(t *testing.T, objs []client.Object) *LearningReco
 		WithScheme(scheme).
 		WithObjects(objs...).
 		Build()
-	r := NewLearningReconciler(cl)
+	r := NewLearningReconciler(cl, violation.NewBuffer())
 	require.NotNil(t, r)
 	return r
 }
 
-func newPromotedKubernetesWNP(namespacedName types.NamespacedName) *securityv1alpha1.WorkloadNetworkPolicy {
+func newPromotedKubernetesWNP(
+	namespacedName types.NamespacedName,
+	mode securityv1alpha1.WorkloadNetworkPolicyMode,
+) *securityv1alpha1.WorkloadNetworkPolicy {
 	return &securityv1alpha1.WorkloadNetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      namespacedName.Name,
@@ -46,7 +50,7 @@ func newPromotedKubernetesWNP(namespacedName types.NamespacedName) *securityv1al
 			},
 		},
 		Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
-			Mode: securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
+			Mode: mode,
 			PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
 				Backend: securityv1alpha1.PolicyBackendKubernetes,
 				Kubernetes: &networkingv1.NetworkPolicySpec{
@@ -193,13 +197,15 @@ func TestProcessKubernetesLearningEvent(t *testing.T) {
 			},
 		},
 		{
-			name: "skips_when_promoted_policies_exist",
+			name: "skips_when_promoted_policies_in_protect_mode",
 			objs: []client.Object{
 				newPromotedKubernetesWNP(
 					getProposalMetadata(frontendRef, networkingv1.PolicyTypeEgress).NamespacedName(),
+					securityv1alpha1.WorkloadNetworkPolicyModeProtect,
 				),
 				newPromotedKubernetesWNP(
 					getProposalMetadata(backendRef, networkingv1.PolicyTypeIngress).NamespacedName(),
+					securityv1alpha1.WorkloadNetworkPolicyModeProtect,
 				),
 			},
 			events: []netypes.LearningEvent{
@@ -213,6 +219,54 @@ func TestProcessKubernetesLearningEvent(t *testing.T) {
 				ingressProposal := getProposalMetadata(backendRef, networkingv1.PolicyTypeIngress)
 				err = r.Get(t.Context(), ingressProposal.NamespacedName(), ingressProposal)
 				require.True(t, apierrors.IsNotFound(err), "expected ingress proposal to be skipped")
+			},
+		},
+		{
+			name: "violations_when_policies_in_monitor_mode",
+			objs: []client.Object{
+				newPromotedKubernetesWNP(
+					getProposalMetadata(frontendRef, networkingv1.PolicyTypeEgress).NamespacedName(),
+					securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
+				),
+				newPromotedKubernetesWNP(
+					getProposalMetadata(backendRef, networkingv1.PolicyTypeIngress).NamespacedName(),
+					securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
+				),
+			},
+			events: []netypes.LearningEvent{
+				newEvent(8080, corev1.ProtocolTCP),
+			},
+			assert: func(t *testing.T, r *LearningReconciler) {
+				observations := r.violationBuffer.Drain()
+				require.Len(t, observations, 2)
+
+				assertObservations := func(t *testing.T, obs violation.Observation, policyName string) {
+					t.Helper()
+					require.Equal(t, *frontendRef, obs.Source)
+					require.Equal(t, *backendRef, obs.Dest)
+					require.Equal(t, corev1.ProtocolTCP, obs.Protocol)
+					require.Equal(t, int32(8080), obs.DstPort)
+					require.Equal(t, securityv1alpha1.WorkloadNetworkPolicyModeMonitor, obs.Action)
+					require.Equal(t, policyName, obs.DenyingPolicyName)
+					require.Equal(t, frontendRef.Namespace, obs.DenyingPolicyNamespace)
+					require.Equal(t, securityv1alpha1.PolicyBackendKubernetes, obs.Provider)
+				}
+
+				egressViolation := observations[0]
+				ingressViolation := observations[1]
+				if observations[0].DenyingPolicyName != getProposalName(frontendRef, networkingv1.PolicyTypeEgress) {
+					egressViolation, ingressViolation = observations[1], observations[0]
+				}
+				assertObservations(
+					t,
+					egressViolation,
+					getProposalName(frontendRef, networkingv1.PolicyTypeEgress),
+				)
+				assertObservations(
+					t,
+					ingressViolation,
+					getProposalName(backendRef, networkingv1.PolicyTypeIngress),
+				)
 			},
 		},
 	}

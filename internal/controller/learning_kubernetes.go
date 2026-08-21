@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 func (r *LearningReconciler) processKubernetesLearningEvent(ctx context.Context, req types.LearningEvent) error {
@@ -65,7 +66,14 @@ func (r *LearningReconciler) reconcileKubernetesProposal(
 		// Continue and maintain the proposal.
 	case 1:
 		// Policy already promoted; skip learning updates for this proposal.
-		// todo!: we should implement the monitor here.
+		policy := policies[0]
+		if policy.Spec.Mode == securityv1alpha1.WorkloadNetworkPolicyModeProtect {
+			// we do nothing, the violation are reported by the cni
+			return nil
+		}
+		if err = r.evaluateMonitorViolation(policy, workload, peer, protocol, direction, dstPort); err != nil {
+			log.FromContext(ctx).Info("Failed to evaluate monitor violation", "msg", err.Error())
+		}
 		return nil
 	default:
 		return errors.New("multiple policies associated with the same proposal")

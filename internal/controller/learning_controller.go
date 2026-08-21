@@ -5,6 +5,7 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
+	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -24,8 +25,9 @@ const (
 type LearningReconciler struct {
 	client.Client
 
-	Scheme    *runtime.Scheme
-	eventChan chan event.TypedGenericEvent[types.LearningEvent]
+	Scheme          *runtime.Scheme
+	eventChan       chan event.TypedGenericEvent[types.LearningEvent]
+	violationBuffer *violation.Buffer
 }
 
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
@@ -35,6 +37,7 @@ type LearningReconciler struct {
 
 func NewLearningReconciler(
 	client client.Client,
+	violationBuffer *violation.Buffer,
 ) *LearningReconciler {
 	return &LearningReconciler{
 		Client: client,
@@ -42,6 +45,7 @@ func NewLearningReconciler(
 			chan event.TypedGenericEvent[types.LearningEvent],
 			defaultEventChannelBufferSize,
 		),
+		violationBuffer: violationBuffer,
 	}
 }
 
