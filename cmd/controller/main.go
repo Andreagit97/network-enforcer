@@ -126,6 +126,7 @@ func setupProviderScraper(
 			Logger:               logger.With("component", "cilium-scraper"),
 			Endpoint:             conf.provider.endpoint,
 			EnqueueLearningEvent: learningEnqueueFunc,
+			ViolationBuffer:      violationBuffer,
 		})
 		if err := mgr.Add(ciliumScraper); err != nil {
 			return fmt.Errorf("unable to add cilium scraper to manager: %w", err)
