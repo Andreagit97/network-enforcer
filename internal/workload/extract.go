@@ -124,3 +124,63 @@ func LookupPodSelectorForWorkload(
 	wk.Selector = *selector
 	return nil
 }
+
+// ResolveDenyingPolicy finds the WorkloadNetworkPolicy associated with the workload violation
+// by matching the workload's selector against each WNP's selector. Reconstructing the WNP name is
+// not possible because users may name their WNPs freely, so we search instead.
+//
+// It returns the owning policy as a types.NamespacedName. A non-nil error means
+// the owning policy could not be resolved: the WNP list could not be retrieved,
+// or no WNP selects the workload.
+//
+// todo!: this method is now duplicated with the istio enricher one, we should probably collapse the istio one into this.
+func ResolveDenyingPolicy(
+	ctx context.Context,
+	c client.Client,
+	wk *securityv1alpha1.WorkloadRef,
+) (types.NamespacedName, error) {
+	namespace := wk.Namespace
+
+	var wnpList securityv1alpha1.WorkloadNetworkPolicyList
+	if err := c.List(ctx, &wnpList, client.InNamespace(namespace)); err != nil {
+		return types.NamespacedName{}, fmt.Errorf("listing WorkloadNetworkPolicies in namespace %s: %w", namespace, err)
+	}
+
+	// Collect every WNP whose selector matches, then pick deterministically. A
+	// WNP is 1:1 with a workload (RFC 0003), so a single match is expected; more
+	// than one means overlapping selectors.
+	var matches []string
+	for i := range wnpList.Items {
+		wnp := &wnpList.Items[i]
+		wnpSelector, err := wnp.Spec.GetSelector()
+		if err != nil {
+			return types.NamespacedName{}, fmt.Errorf(
+				"getting selector for WorkloadNetworkPolicy %s: %w",
+				wnp.Name,
+				err,
+			)
+		}
+		if securityv1alpha1.SelectorEqual(&wk.Selector, &wnpSelector) {
+			matches = append(matches, wnp.Name)
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return types.NamespacedName{}, fmt.Errorf(
+			"no WorkloadNetworkPolicy selects the workload '%s/%s'",
+			namespace,
+			wk.OwnerName,
+		)
+	case 1:
+		return types.NamespacedName{Namespace: namespace, Name: matches[0]}, nil
+	default:
+		// Overlapping selectors matched more than one WNP return an error
+		return types.NamespacedName{}, fmt.Errorf(
+			"multiple WorkloadNetworkPolicies select the workload '%s/%s': %s",
+			namespace,
+			wk.OwnerName,
+			strings.Join(matches, ", "),
+		)
+	}
+}

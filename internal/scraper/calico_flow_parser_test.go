@@ -385,7 +385,7 @@ func TestProcessCalicoFlowResolvesWorkloadsWithFakeClient(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			result := resolveParsedFlow(t.Context(), s.resolve, parseCalicoFlow(tc.flow))
+			result := resolveParsedFlow(t.Context(), s.resolve, nil, parseCalicoFlow(tc.flow))
 			require.Equal(t, tc.processFlowResult.outcome, result.outcome)
 			if tc.processFlowResult.outcome == processFlowOutcomeEnqueue {
 				require.Equal(t, tc.processFlowResult.event, result.event)
