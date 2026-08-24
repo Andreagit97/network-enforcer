@@ -3,6 +3,7 @@ module github.com/rancher-sandbox/network-enforcer
 go 1.26.6
 
 require (
+	github.com/avast/retry-go/v4 v4.7.0
 	github.com/cilium/cilium v1.20.0
 	github.com/go-logr/logr v1.4.4
 	github.com/stretchr/testify v1.11.1
@@ -17,7 +18,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.11.0
 	google.golang.org/grpc v1.83.0
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
-	istio.io/api v1.31.0-beta.0
+	istio.io/api v1.31.0-rc.0
 	istio.io/client-go v1.30.3
 	k8s.io/api v0.36.3
 	k8s.io/apimachinery v0.36.3
@@ -29,7 +30,6 @@ require (
 require (
 	cel.dev/expr v0.25.2 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
-	github.com/avast/retry-go/v4 v4.7.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
