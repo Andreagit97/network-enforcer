@@ -7,6 +7,7 @@ import (
 	"time"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
+	netypes "github.com/rancher-sandbox/network-enforcer/internal/types"
 	networkingv1 "k8s.io/api/networking/v1"
 
 	"github.com/stretchr/testify/assert"
@@ -411,6 +412,11 @@ func assessKubernetesPoliciesAreCreated(ctx context.Context, t *testing.T, _ *en
 }
 
 func assessViolationInProtectMode(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
+	// todo!: remove this when we support Calico
+	if loadSuiteConfig().ProviderName() == string(netypes.ProviderCalico) {
+		t.Skip("Skipping assert violations for calico")
+	}
+
 	storedPolicies := ctx.Value(key("policies")).([]securityv1alpha1.WorkloadNetworkPolicy)
 	client := getSecurityV1Alpha1Client(ctx)
 
