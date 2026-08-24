@@ -184,6 +184,8 @@ func (r *WorkloadNetworkPolicyStatusSync) correlateViolationsToWNPs(
 	result := make(map[types.NamespacedName][]securityv1alpha1.ViolationRecord)
 
 	for _, obs := range scraped {
+		// todo!: rework all this violation attribution logic, it shouldn't be necessary,
+		// each scraper should populate DenyingPolicyNamespace/Name for all observations
 		wnpKey, ok := r.wnpKeyForViolation(obs, wnpByKey)
 		if !ok {
 			continue
