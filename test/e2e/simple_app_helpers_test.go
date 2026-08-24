@@ -201,9 +201,10 @@ func assertPacketBlockedFromClient(
 
 	payload, cmd := getProtoCmd(proto, port)
 	require.Eventually(t, func() bool {
-		stdout, _, err := execInSimpleClientDeploymentRaw(ctx, cmd)
+		// we need to try multiple times because it may take some time for the policy to be enforced.
+		stdout, _, _ := execInSimpleClientDeploymentRaw(ctx, cmd)
 		if strings.Contains(stdout, payload) {
-			t.Logf("traffic to port %d still echoing (err=%v)", port, err)
+			t.Logf("traffic to port %d still echoing", port)
 			return false
 		}
 		return true
