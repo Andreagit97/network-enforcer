@@ -68,7 +68,8 @@ func TestParseCiliumFlow(t *testing.T) {
 		{
 			name: "dropped_ingress_flow_records_violation",
 			flow: &flowpb.Flow{
-				IsReply:          wrapperspb.Bool(false),
+				// DROPPED events don't have the `is_reply` field
+				// IsReply:
 				Time:             timestamppb.New(flowTimestamp),
 				Verdict:          flowpb.Verdict_DROPPED,
 				TrafficDirection: hubbleObserver.TrafficDirection_INGRESS,
@@ -102,7 +103,6 @@ func TestParseCiliumFlow(t *testing.T) {
 		{
 			name: "dropped_egress_flow_records_violation",
 			flow: &flowpb.Flow{
-				IsReply:          wrapperspb.Bool(false),
 				Time:             timestamppb.New(flowTimestamp),
 				Verdict:          flowpb.Verdict_DROPPED,
 				TrafficDirection: hubbleObserver.TrafficDirection_EGRESS,
@@ -136,7 +136,6 @@ func TestParseCiliumFlow(t *testing.T) {
 		{
 			name: "dropped_flow_unknown_direction_errors",
 			flow: &flowpb.Flow{
-				IsReply:          wrapperspb.Bool(false),
 				Verdict:          flowpb.Verdict_DROPPED,
 				TrafficDirection: hubbleObserver.TrafficDirection_TRAFFIC_DIRECTION_UNKNOWN,
 				L4:               &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
@@ -450,7 +449,6 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 		{
 			name: "dropped_ingress_flow_resolves_violation_policy_on_destination",
 			flow: flowResponse(&flowpb.Flow{
-				IsReply:          wrapperspb.Bool(false),
 				Time:             timestamppb.New(flowTimestamp),
 				Verdict:          flowpb.Verdict_DROPPED,
 				TrafficDirection: hubbleObserver.TrafficDirection_INGRESS,
@@ -492,7 +490,6 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 		{
 			name: "dropped_egress_flow_resolves_violation_policy_on_source",
 			flow: flowResponse(&flowpb.Flow{
-				IsReply:          wrapperspb.Bool(false),
 				Time:             timestamppb.New(flowTimestamp),
 				Verdict:          flowpb.Verdict_DROPPED,
 				TrafficDirection: hubbleObserver.TrafficDirection_EGRESS,

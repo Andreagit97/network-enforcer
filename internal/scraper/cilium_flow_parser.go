@@ -88,14 +88,17 @@ func fromEndpointToWorkloadRef(endpoint *hubbleObserver.Endpoint) (*securityv1al
 func discardFlow(flowInfo *flowpb.Flow) bool {
 	isReply := flowInfo.GetIsReply()
 	// For now we ignore reply flows, as they are not relevant for learning traffic for k8s network policies.
-	// this means that we will see the same flow multiple times with different TCP flags.
+	// We don't filter on TCP flags. This means that we will see the same flow multiple times with different TCP flags.
 	// example:
 	//	1. SYN
 	//	2. ACK, ACK/PSH
 	//	3. FIN
 	//  4. ACK
 	// this is probably not ideal but acceptable for now.
-	return isReply == nil || isReply.GetValue()
+	//
+	// In flows with `DROPPED` verdict, `is_reply` field is `nil` so we shouldn't drop them.
+	// We should just drop when the field is there and it is true.
+	return isReply != nil && isReply.GetValue()
 }
 
 func violationTimestamp(flow *flowpb.Flow) metav1.Time {

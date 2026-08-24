@@ -94,6 +94,7 @@ func (s *CiliumScraper) stream(ctx context.Context, successfulConnection *bool) 
 				s.Logger.WarnContext(ctx, "Failed to enqueue learning event, channel is full")
 			}
 		case processFlowOutcomeViolation:
+			s.Logger.InfoContext(ctx, "Received violation", "violation", result.observation)
 			if s.ViolationBuffer.Record(result.observation) {
 				s.Logger.WarnContext(ctx, "Violation buffer is full, dropped the oldest violation")
 			}
