@@ -7,7 +7,6 @@ import (
 	"time"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
-	netypes "github.com/rancher-sandbox/network-enforcer/internal/types"
 	networkingv1 "k8s.io/api/networking/v1"
 
 	"github.com/stretchr/testify/assert"
@@ -412,11 +411,6 @@ func assessKubernetesPoliciesAreCreated(ctx context.Context, t *testing.T, _ *en
 }
 
 func assessViolationInProtectMode(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
-	// todo!: remove this when we support Calico
-	if loadSuiteConfig().ProviderName() == string(netypes.ProviderCalico) {
-		t.Skip("Skipping assert violations for calico")
-	}
-
 	storedPolicies := ctx.Value(key("policies")).([]securityv1alpha1.WorkloadNetworkPolicy)
 	client := getSecurityV1Alpha1Client(ctx)
 
@@ -439,9 +433,11 @@ func assessViolationInProtectMode(ctx context.Context, t *testing.T, _ *envconf.
 
 			// Assert some fields on the violation
 			require.Len(t, policy.Status.Violations, 2)
-			require.GreaterOrEqual(t, policy.Status.ViolationCount, int64(2))
 			require.Equal(t, int64(2), policy.Status.ActiveViolationCount)
-			require.Equal(t, int64(2), policy.Status.ViolationCount)
+			// ViolationCount tracks every scrape observation, including deduped
+			// re-reports of the same logical violation. Calico Goldmane may
+			// re-stream the same deny flow across aggregation windows.
+			require.GreaterOrEqual(t, policy.Status.ViolationCount, int64(len(policy.Status.Violations)))
 
 			// Even if the protect violation is generated after the monitor one, some CNI report the timestamp
 			// as the starting time of the flow rather then the time the packet was dropped, so here we don't know

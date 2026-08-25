@@ -59,6 +59,14 @@ func resolveOutcome(role string, err error) processFlowResult {
 	return processFlowError(fmt.Errorf("cannot resolve %s workload: %w", role, err))
 }
 
+func bindResolveDenyingPolicy(
+	c client.Client,
+) func(context.Context, *securityv1alpha1.WorkloadRef) (k8stypes.NamespacedName, error) {
+	return func(ctx context.Context, ref *securityv1alpha1.WorkloadRef) (k8stypes.NamespacedName, error) {
+		return workload.ResolveDenyingPolicy(ctx, c, ref)
+	}
+}
+
 func resolveViolationDenyingPolicy(
 	ctx context.Context,
 	resolvePolicy func(context.Context, *securityv1alpha1.WorkloadRef) (k8stypes.NamespacedName, error),
