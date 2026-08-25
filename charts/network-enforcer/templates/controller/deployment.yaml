@@ -30,6 +30,7 @@ spec:
       {{- end }}
       containers:
       - args:
+        - --log-level={{ .Values.controller.logLevel }}
         {{- toYaml .Values.controller.args | nindent 8 }}
         - --provider-name={{ .Values.controller.provider.name }}
         - --provider-endpoint={{ include "network-enforcer.controller.providerEndpoint" . }}

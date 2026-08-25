@@ -85,10 +85,19 @@ type config struct {
 	probeAddr            string
 	secureMetrics        bool
 	enableHTTP2          bool
+	logLevel             string
 	provider             providerConfig
 	otel                 otelConf
 	tlsOpts              []func(*tls.Config)
 	wnpStatusSyncConfig  controller.WorkloadNetworkPolicyStatusSyncConfig
+}
+
+func parseLogLevel(level string) (slog.Level, error) {
+	parsed := slog.LevelInfo
+	if err := parsed.UnmarshalText([]byte(level)); err != nil {
+		return 0, fmt.Errorf("invalid log level %q: %w", level, err)
+	}
+	return parsed, nil
 }
 
 func setupProviderScraper(
@@ -349,6 +358,8 @@ func main() {
 	flag.StringVar(&conf.metrics.CertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&conf.enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics server")
+	flag.StringVar(&conf.logLevel, "log-level", "info",
+		"Log level for controller logs. Valid values: debug, info, warn, error.")
 	flag.StringVar(&conf.provider.name, "provider-name", "",
 		"Data-plane provider used by the controller. Valid values: istio, cilium, calico.")
 	flag.StringVar(
@@ -389,12 +400,17 @@ func main() {
 		"The interval at which WorkloadNetworkPolicy status is synced.")
 	flag.Parse()
 
-	slogHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+	parsedLogLevel, err := parseLogLevel(conf.logLevel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to parse log level: %v\n", err)
+		os.Exit(1)
+	}
+	slogHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: parsedLogLevel})
 	slogger := slog.New(slogHandler).With("component", "controller")
 	slog.SetDefault(slogger)
 	ctrl.SetLogger(logr.FromSlogHandler(slogger.Handler()))
 
-	if err := run(slogger, conf); err != nil {
+	if err = run(slogger, conf); err != nil {
 		slogger.Error("failed to run", "error", err)
 		os.Exit(1)
 	}

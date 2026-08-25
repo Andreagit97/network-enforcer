@@ -1,4 +1,6 @@
 controller:
+  # @schema enum: [debug, info, warn, error]
+  logLevel: info
   args:
   - --metrics-bind-address=:8443
   - --leader-elect
