@@ -15,13 +15,14 @@ import (
 
 func installCilium(ctx context.Context, cfg *envconf.Config) (context.Context, error) {
 	const (
-		namespace      = "kube-system"
-		defaultVersion = "1.20.0"
-		daemonSetName  = "cilium"
-		operatorName   = "cilium-operator"
-		repoLocalName  = defaultNamespacePref + "-cilium"
-		repoURL        = "https://helm.cilium.io/"
-		chartPath      = "/cilium"
+		namespace                 = "kube-system"
+		defaultVersion            = "1.20.0"
+		daemonSetName             = "cilium"
+		operatorName              = "cilium-operator"
+		repoLocalName             = defaultNamespacePref + "-cilium"
+		repoURL                   = "https://helm.cilium.io/"
+		chartPath                 = "/cilium"
+		hubbleRelayDeploymentName = "hubble-relay"
 	)
 
 	manager := helm.New(cfg.KubeconfigFile())
@@ -78,6 +79,14 @@ func installCilium(ctx context.Context, cfg *envconf.Config) (context.Context, e
 		wait.WithTimeout(defaultOperationTimeout),
 	); err != nil {
 		return ctx, fmt.Errorf("wait cilium daemonset ready: %w", err)
+	}
+
+	logger.InfoContext(ctx, "⏲️ waiting for", "hubble relay deployment", hubbleRelayDeploymentName)
+	if err = wait.For(
+		conditions.New(r).DeploymentAvailable(hubbleRelayDeploymentName, namespace),
+		wait.WithTimeout(defaultOperationTimeout),
+	); err != nil {
+		return ctx, fmt.Errorf("wait hubble relay deployment ready: %w", err)
 	}
 	return ctx, nil
 }
