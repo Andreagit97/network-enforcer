@@ -199,7 +199,7 @@ func parseCiliumFlowResponse(flow *flowpb.Flow) processFlowResult {
 				Source:    *sourceWorkload,
 				Dest:      *destWorkload,
 				Protocol:  proto,
-				DstPort:   int32(dstPort), //nolint:gosec // dstPort is always in the range 0 - 65536
+				DstPort:   int32(dstPort), //nolint:gosec // dstPort is always in the range 0 - 65535
 				Action:    securityv1alpha1.WorkloadNetworkPolicyModeProtect,
 				// for now our policy are of ALLOW type so we never have a
 				// correlation cilium-side. We will try to resolve the denying
