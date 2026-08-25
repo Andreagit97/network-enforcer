@@ -3,6 +3,7 @@ package scraper
 import (
 	"errors"
 	"testing"
+	"time"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	hubbleObserver "github.com/cilium/cilium/api/v1/observer"
@@ -10,10 +11,13 @@ import (
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/testutil"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
+	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -36,6 +40,8 @@ func testProcessFlowOutcomeError() processFlowResult {
 
 func TestParseCiliumFlow(t *testing.T) {
 	t.Parallel()
+
+	flowTimestamp := time.Date(2026, 8, 24, 10, 11, 12, 0, time.UTC)
 
 	endpoint := func(name, kind string) *hubbleObserver.Endpoint {
 		return &hubbleObserver.Endpoint{
@@ -60,12 +66,101 @@ func TestParseCiliumFlow(t *testing.T) {
 			processFlowResult: processFlowSkip(),
 		},
 		{
-			name: "dropped_flow_is_skipped",
+			name: "dropped_reason_different_from_policy_denied",
 			flow: &flowpb.Flow{
-				IsReply: wrapperspb.Bool(false),
-				Verdict: flowpb.Verdict_DROPPED,
+				// DROPPED events don't have the `is_reply` field
+				// IsReply:
+				Time:             timestamppb.New(flowTimestamp),
+				Verdict:          flowpb.Verdict_DROPPED,
+				DropReasonDesc:   hubbleObserver.DropReason_INVALID_IPV6_EXTENSION_HEADER,
+				TrafficDirection: hubbleObserver.TrafficDirection_INGRESS,
+				L4:               &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
+				Source:           endpoint("source-deploy", "Deployment"),
+				Destination:      endpoint("dest-deploy", "Deployment"),
 			},
 			processFlowResult: processFlowSkip(),
+		},
+		{
+			name: "dropped_ingress_flow_records_violation",
+			flow: &flowpb.Flow{
+				// DROPPED events don't have the `is_reply` field
+				// IsReply:
+				Time:             timestamppb.New(flowTimestamp),
+				Verdict:          flowpb.Verdict_DROPPED,
+				DropReasonDesc:   hubbleObserver.DropReason_POLICY_DENIED,
+				TrafficDirection: hubbleObserver.TrafficDirection_INGRESS,
+				L4:               &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
+				Source:           endpoint("source-deploy", "Deployment"),
+				Destination:      endpoint("dest-deploy", "Deployment"),
+			},
+			processFlowResult: processFlowRecordViolation(violation.Observation{
+				Provider:  securityv1alpha1.PolicyBackendKubernetes,
+				Direction: networkingv1.PolicyTypeIngress,
+				ViolationInfo: securityv1alpha1.ViolationInfo{
+					Timestamp: metav1.NewTime(flowTimestamp),
+					Source: securityv1alpha1.WorkloadRef{
+						Namespace: defaultCiliumTestNamespace,
+						OwnerName: "source-deploy",
+						OwnerKind: securityv1alpha1.WorkloadKindDeployment,
+					},
+					Dest: securityv1alpha1.WorkloadRef{
+						Namespace: defaultCiliumTestNamespace,
+						OwnerName: "dest-deploy",
+						OwnerKind: securityv1alpha1.WorkloadKindDeployment,
+					},
+					Protocol:               corev1.ProtocolTCP,
+					DstPort:                8080,
+					Action:                 securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+					DenyingPolicyNamespace: "",
+					DenyingPolicyName:      "",
+				},
+			}),
+		},
+		{
+			name: "dropped_egress_flow_records_violation",
+			flow: &flowpb.Flow{
+				Time:             timestamppb.New(flowTimestamp),
+				Verdict:          flowpb.Verdict_DROPPED,
+				DropReasonDesc:   hubbleObserver.DropReason_POLICY_DENY,
+				TrafficDirection: hubbleObserver.TrafficDirection_EGRESS,
+				L4:               &flowpb.Layer4{Protocol: &flowpb.Layer4_UDP{UDP: &flowpb.UDP{DestinationPort: 5353}}},
+				Source:           endpoint("source-sts", "StatefulSet"),
+				Destination:      endpoint("dest-ds", "DaemonSet"),
+			},
+			processFlowResult: processFlowRecordViolation(violation.Observation{
+				Provider:  securityv1alpha1.PolicyBackendKubernetes,
+				Direction: networkingv1.PolicyTypeEgress,
+				ViolationInfo: securityv1alpha1.ViolationInfo{
+					Timestamp: metav1.NewTime(flowTimestamp),
+					Source: securityv1alpha1.WorkloadRef{
+						Namespace: defaultCiliumTestNamespace,
+						OwnerName: "source-sts",
+						OwnerKind: securityv1alpha1.WorkloadKindStatefulSet,
+					},
+					Dest: securityv1alpha1.WorkloadRef{
+						Namespace: defaultCiliumTestNamespace,
+						OwnerName: "dest-ds",
+						OwnerKind: securityv1alpha1.WorkloadKindDaemonSet,
+					},
+					Protocol:               corev1.ProtocolUDP,
+					DstPort:                5353,
+					Action:                 securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+					DenyingPolicyNamespace: "",
+					DenyingPolicyName:      "",
+				},
+			}),
+		},
+		{
+			name: "dropped_flow_unknown_direction_errors",
+			flow: &flowpb.Flow{
+				Verdict:          flowpb.Verdict_DROPPED,
+				DropReasonDesc:   hubbleObserver.DropReason_POLICY_DENY,
+				TrafficDirection: hubbleObserver.TrafficDirection_TRAFFIC_DIRECTION_UNKNOWN,
+				L4:               &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
+				Source:           endpoint("source-deploy", "Deployment"),
+				Destination:      endpoint("dest-deploy", "Deployment"),
+			},
+			processFlowResult: testProcessFlowOutcomeError(),
 		},
 		{
 			name: "unsupported_protocol",
@@ -210,6 +305,9 @@ func TestParseCiliumFlow(t *testing.T) {
 			if tc.processFlowResult.outcome == processFlowOutcomeEnqueue {
 				require.Equal(t, tc.processFlowResult.event, result.event)
 			}
+			if tc.processFlowResult.outcome == processFlowOutcomeViolation {
+				require.Equal(t, tc.processFlowResult.observation, result.observation)
+			}
 		})
 	}
 }
@@ -220,7 +318,13 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, appsv1.AddToScheme(scheme))
 	require.NoError(t, corev1.AddToScheme(scheme))
+	require.NoError(t, securityv1alpha1.AddToScheme(scheme))
 
+	flowTimestamp := time.Date(2026, 8, 24, 10, 11, 12, 0, time.UTC)
+	sourcePolicyName := "source-policy"
+	dstPolicyName := "dest-policy"
+	sourceSelector := metav1.LabelSelector{MatchLabels: map[string]string{"app": "source"}}
+	dstSelector := metav1.LabelSelector{MatchLabels: map[string]string{"app": "dest"}}
 	controller := true
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -228,13 +332,13 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 			&appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{Name: "source-deploy", Namespace: defaultCiliumTestNamespace},
 				Spec: appsv1.DeploymentSpec{
-					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "source"}},
+					Selector: &sourceSelector,
 				},
 			},
 			&appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{Name: "dest-deploy", Namespace: defaultCiliumTestNamespace},
 				Spec: appsv1.DeploymentSpec{
-					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "dest"}},
+					Selector: &dstSelector,
 				},
 			},
 			&appsv1.DaemonSet{
@@ -259,6 +363,28 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "standalone-pod",
 					Namespace: "kube-system",
+				},
+			},
+			&securityv1alpha1.WorkloadNetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: sourcePolicyName, Namespace: defaultCiliumTestNamespace},
+				Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
+					PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+						Backend: securityv1alpha1.PolicyBackendKubernetes,
+						Kubernetes: &networkingv1.NetworkPolicySpec{
+							PodSelector: sourceSelector,
+						},
+					},
+				},
+			},
+			&securityv1alpha1.WorkloadNetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: dstPolicyName, Namespace: defaultCiliumTestNamespace},
+				Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
+					PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+						Backend: securityv1alpha1.PolicyBackendKubernetes,
+						Kubernetes: &networkingv1.NetworkPolicySpec{
+							PodSelector: dstSelector,
+						},
+					},
 				},
 			},
 		).Build()
@@ -336,6 +462,90 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 				DstPort:  53,
 				Protocol: corev1.ProtocolUDP,
 				Backend:  securityv1alpha1.PolicyBackendKubernetes,
+			}),
+		},
+		{
+			name: "dropped_ingress_flow_resolves_violation_policy_on_destination",
+			flow: flowResponse(&flowpb.Flow{
+				Time:             timestamppb.New(flowTimestamp),
+				Verdict:          flowpb.Verdict_DROPPED,
+				DropReasonDesc:   hubbleObserver.DropReason_POLICY_DENY,
+				TrafficDirection: hubbleObserver.TrafficDirection_INGRESS,
+				L4:               &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
+				Source: &hubbleObserver.Endpoint{
+					Namespace: defaultCiliumTestNamespace,
+					Workloads: []*flowpb.Workload{{Name: "source-deploy", Kind: "Deployment"}},
+				},
+				Destination: &hubbleObserver.Endpoint{
+					Namespace: defaultCiliumTestNamespace,
+					Workloads: []*flowpb.Workload{{Name: "dest-deploy", Kind: "Deployment"}},
+				},
+			}),
+			processFlowResult: processFlowRecordViolation(violation.Observation{
+				Provider:  securityv1alpha1.PolicyBackendKubernetes,
+				Direction: networkingv1.PolicyTypeIngress,
+				ViolationInfo: securityv1alpha1.ViolationInfo{
+					Timestamp: metav1.NewTime(flowTimestamp),
+					Source: securityv1alpha1.WorkloadRef{
+						Namespace: defaultCiliumTestNamespace,
+						OwnerName: "source-deploy",
+						OwnerKind: securityv1alpha1.WorkloadKindDeployment,
+						Selector:  sourceSelector,
+					},
+					Dest: securityv1alpha1.WorkloadRef{
+						Namespace: defaultCiliumTestNamespace,
+						OwnerName: "dest-deploy",
+						OwnerKind: securityv1alpha1.WorkloadKindDeployment,
+						Selector:  dstSelector,
+					},
+					Protocol:               corev1.ProtocolTCP,
+					DstPort:                8080,
+					Action:                 securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+					DenyingPolicyNamespace: defaultCiliumTestNamespace,
+					DenyingPolicyName:      dstPolicyName,
+				},
+			}),
+		},
+		{
+			name: "dropped_egress_flow_resolves_violation_policy_on_source",
+			flow: flowResponse(&flowpb.Flow{
+				Time:             timestamppb.New(flowTimestamp),
+				Verdict:          flowpb.Verdict_DROPPED,
+				DropReasonDesc:   hubbleObserver.DropReason_POLICY_DENY,
+				TrafficDirection: hubbleObserver.TrafficDirection_EGRESS,
+				L4:               &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
+				Source: &hubbleObserver.Endpoint{
+					Namespace: defaultCiliumTestNamespace,
+					Workloads: []*flowpb.Workload{{Name: "source-deploy", Kind: "Deployment"}},
+				},
+				Destination: &hubbleObserver.Endpoint{
+					Namespace: defaultCiliumTestNamespace,
+					Workloads: []*flowpb.Workload{{Name: "dest-deploy", Kind: "Deployment"}},
+				},
+			}),
+			processFlowResult: processFlowRecordViolation(violation.Observation{
+				Provider:  securityv1alpha1.PolicyBackendKubernetes,
+				Direction: networkingv1.PolicyTypeEgress,
+				ViolationInfo: securityv1alpha1.ViolationInfo{
+					Timestamp: metav1.NewTime(flowTimestamp),
+					Source: securityv1alpha1.WorkloadRef{
+						Namespace: defaultCiliumTestNamespace,
+						OwnerName: "source-deploy",
+						OwnerKind: securityv1alpha1.WorkloadKindDeployment,
+						Selector:  sourceSelector,
+					},
+					Dest: securityv1alpha1.WorkloadRef{
+						Namespace: defaultCiliumTestNamespace,
+						OwnerName: "dest-deploy",
+						OwnerKind: securityv1alpha1.WorkloadKindDeployment,
+						Selector:  dstSelector,
+					},
+					Protocol:               corev1.ProtocolTCP,
+					DstPort:                8080,
+					Action:                 securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+					DenyingPolicyNamespace: defaultCiliumTestNamespace,
+					DenyingPolicyName:      sourcePolicyName,
+				},
 			}),
 		},
 		{
@@ -429,6 +639,9 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 			require.Equal(t, tc.processFlowResult.outcome, result.outcome)
 			if tc.processFlowResult.outcome == processFlowOutcomeEnqueue {
 				require.Equal(t, tc.processFlowResult.event, result.event)
+			}
+			if tc.processFlowResult.outcome == processFlowOutcomeViolation {
+				require.Equal(t, tc.processFlowResult.observation, result.observation)
 			}
 		})
 	}

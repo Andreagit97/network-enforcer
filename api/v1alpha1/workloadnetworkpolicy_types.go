@@ -154,3 +154,24 @@ func (wnp *WorkloadNetworkPolicy) HasPromotedLabel(proposalName string) bool {
 	}
 	return wnp.Labels[PolicyPromotedFromLabelKey] == proposalName
 }
+
+func (wnp *WorkloadNetworkPolicySpec) GetSelector() (metav1.LabelSelector, error) {
+	if wnp == nil {
+		return metav1.LabelSelector{}, errors.New("WorkloadNetworkPolicy is nil")
+	}
+
+	switch wnp.Backend {
+	case PolicyBackendKubernetes:
+		if wnp.Kubernetes == nil {
+			return metav1.LabelSelector{}, errors.New("WorkloadNetworkPolicy kubernetes backend is nil")
+		}
+		return wnp.Kubernetes.PodSelector, nil
+	case PolicyBackendIstio:
+		if wnp.Istio == nil {
+			return metav1.LabelSelector{}, errors.New("WorkloadNetworkPolicy istio backend is nil")
+		}
+		return wnp.Istio.Selector, nil
+	default:
+		return metav1.LabelSelector{}, fmt.Errorf("unsupported WorkloadNetworkPolicy backend: %s", wnp.Backend)
+	}
+}

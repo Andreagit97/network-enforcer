@@ -9,8 +9,11 @@ import (
 	hubbleObserver "github.com/cilium/cilium/api/v1/observer"
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
+	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	"github.com/rancher-sandbox/network-enforcer/internal/workload"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
@@ -85,15 +88,24 @@ func fromEndpointToWorkloadRef(endpoint *hubbleObserver.Endpoint) (*securityv1al
 func discardFlow(flowInfo *flowpb.Flow) bool {
 	isReply := flowInfo.GetIsReply()
 	// For now we ignore reply flows, as they are not relevant for learning traffic for k8s network policies.
-	// We ignore as well dropped flows, since we will use them for violations.
-	// this means that we will see the same flow multiple times with different TCP flags.
+	// We don't filter on TCP flags. This means that we will see the same flow multiple times with different TCP flags.
 	// example:
 	//	1. SYN
 	//	2. ACK, ACK/PSH
 	//	3. FIN
 	//  4. ACK
 	// this is probably not ideal but acceptable for now.
-	return isReply == nil || isReply.GetValue() || flowInfo.GetVerdict() == hubbleObserver.Verdict_DROPPED
+	//
+	// In flows with `DROPPED` verdict, `is_reply` field is `nil` so we shouldn't drop them.
+	// We should just drop when the field is there and it is true.
+	return isReply != nil && isReply.GetValue()
+}
+
+func violationTimestamp(flow *flowpb.Flow) metav1.Time {
+	if ts := flow.GetTime(); ts != nil {
+		return metav1.NewTime(ts.AsTime())
+	}
+	return metav1.Now()
 }
 
 func extractPortAndProtocol(flowInfo *flowpb.Flow) (uint32, corev1.Protocol, error) {
@@ -156,6 +168,49 @@ func parseCiliumFlowResponse(flow *flowpb.Flow) processFlowResult {
 		return processFlowSkip()
 	}
 
+	if flow.GetVerdict() == hubbleObserver.Verdict_DROPPED {
+		// Dropped doesn't necessarily mean a policy dropped the traffic, there could be
+		// other reasons (e.g. invalid IPV6 extension header). So we need to check the
+		// drop reason. In case of drops not related to a policy, we skip the flow for now.
+		//
+		// `DropReason_POLICY_DENY` -> a policy explicitly denied the traffic.
+		// `DropReason_POLICY_DENIED` -> the packet was implicitly dropped because there were no policies allowing it.
+		if flow.GetDropReasonDesc() != hubbleObserver.DropReason_POLICY_DENIED &&
+			flow.GetDropReasonDesc() != hubbleObserver.DropReason_POLICY_DENY {
+			return processFlowSkip()
+		}
+
+		// we need the direction to determine if the violation happens at the source or destination
+		var direction networkingv1.PolicyType
+		switch flow.GetTrafficDirection() {
+		case hubbleObserver.TrafficDirection_TRAFFIC_DIRECTION_UNKNOWN:
+			return processFlowError(errors.New("found violation flow with unknown traffic direction"))
+		case hubbleObserver.TrafficDirection_INGRESS:
+			direction = networkingv1.PolicyTypeIngress
+		case hubbleObserver.TrafficDirection_EGRESS:
+			direction = networkingv1.PolicyTypeEgress
+		}
+
+		observation := violation.Observation{
+			Provider:  securityv1alpha1.PolicyBackendKubernetes,
+			Direction: direction,
+			ViolationInfo: securityv1alpha1.ViolationInfo{
+				Timestamp: violationTimestamp(flow),
+				Source:    *sourceWorkload,
+				Dest:      *destWorkload,
+				Protocol:  proto,
+				DstPort:   int32(dstPort), //nolint:gosec // dstPort is always in the range 0 - 65535
+				Action:    securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+				// for now our policy are of ALLOW type so we never have a
+				// correlation cilium-side. We will try to resolve the denying
+				// policy later on in the flow
+				DenyingPolicyNamespace: "",
+				DenyingPolicyName:      "",
+			},
+		}
+		return processFlowRecordViolation(observation)
+	}
+
 	return processFlowEnqueue(types.LearningEvent{
 		Source:   sourceWorkload,
 		Dest:     destWorkload,
@@ -170,6 +225,13 @@ func (s *CiliumScraper) resolve(ctx context.Context, ref *securityv1alpha1.Workl
 		return s.resolvePod(ctx, ref)
 	}
 	return completeSelector(ctx, s.Client, ref)
+}
+
+func (s *CiliumScraper) resolveDenyingPolicy(
+	ctx context.Context,
+	ref *securityv1alpha1.WorkloadRef,
+) (k8stypes.NamespacedName, error) {
+	return workload.ResolveDenyingPolicy(ctx, s.Client, ref)
 }
 
 func (s *CiliumScraper) resolvePod(ctx context.Context, ref *securityv1alpha1.WorkloadRef) error {
@@ -203,7 +265,7 @@ func (s *CiliumScraper) processFlow(
 		if flowResponse == nil {
 			return processFlowError(errors.New("found nil response flow"))
 		}
-		return resolveParsedFlow(ctx, s.resolve, parseCiliumFlowResponse(flowResponse))
+		return resolveParsedFlow(ctx, s.resolve, s.resolveDenyingPolicy, parseCiliumFlowResponse(flowResponse))
 	case *hubbleObserver.GetFlowsResponse_LostEvents:
 		flowLost := flow.GetLostEvents()
 		if flowLost == nil {

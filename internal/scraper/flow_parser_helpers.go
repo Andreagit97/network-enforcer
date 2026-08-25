@@ -7,7 +7,10 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
+	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	"github.com/rancher-sandbox/network-enforcer/internal/workload"
+	networkingv1 "k8s.io/api/networking/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -22,13 +25,15 @@ type processFlowOutcome int
 const (
 	processFlowOutcomeSkip processFlowOutcome = iota
 	processFlowOutcomeEnqueue
+	processFlowOutcomeViolation
 	processFlowOutcomeError
 )
 
 type processFlowResult struct {
-	outcome processFlowOutcome
-	event   types.LearningEvent
-	err     error
+	outcome     processFlowOutcome
+	event       types.LearningEvent
+	observation violation.Observation
+	err         error
 }
 
 func processFlowSkip() processFlowResult {
@@ -37,6 +42,10 @@ func processFlowSkip() processFlowResult {
 
 func processFlowEnqueue(event types.LearningEvent) processFlowResult {
 	return processFlowResult{outcome: processFlowOutcomeEnqueue, event: event}
+}
+
+func processFlowRecordViolation(observation violation.Observation) processFlowResult {
+	return processFlowResult{outcome: processFlowOutcomeViolation, observation: observation}
 }
 
 func processFlowError(err error) processFlowResult {
@@ -50,20 +59,67 @@ func resolveOutcome(role string, err error) processFlowResult {
 	return processFlowError(fmt.Errorf("cannot resolve %s workload: %w", role, err))
 }
 
+func resolveViolationDenyingPolicy(
+	ctx context.Context,
+	resolvePolicy func(context.Context, *securityv1alpha1.WorkloadRef) (k8stypes.NamespacedName, error),
+	observation *violation.Observation,
+) error {
+	if observation.DenyingPolicyName != "" {
+		// Calico could have already resolved the policy name
+		// so we do that only if necessary
+		return nil
+	}
+	// this is the correct workload if the direction is egress
+	ref := &observation.Source
+	if observation.Direction == networkingv1.PolicyTypeIngress {
+		ref = &observation.Dest
+	}
+
+	policy, err := resolvePolicy(ctx, ref)
+	if err != nil {
+		return fmt.Errorf("cannot resolve denying policy: %w", err)
+	}
+
+	observation.DenyingPolicyName = policy.Name
+	observation.DenyingPolicyNamespace = policy.Namespace
+	return nil
+}
+
 func resolveParsedFlow(
 	ctx context.Context,
-	resolve func(context.Context, *securityv1alpha1.WorkloadRef) error,
+	resolveWorkload func(context.Context, *securityv1alpha1.WorkloadRef) error,
+	resolvePolicy func(context.Context, *securityv1alpha1.WorkloadRef) (k8stypes.NamespacedName, error),
 	parsed processFlowResult,
 ) processFlowResult {
-	if parsed.outcome != processFlowOutcomeEnqueue {
+	var source *securityv1alpha1.WorkloadRef
+	var dest *securityv1alpha1.WorkloadRef
+	switch parsed.outcome {
+	case processFlowOutcomeEnqueue:
+		source = parsed.event.Source
+		dest = parsed.event.Dest
+	case processFlowOutcomeViolation:
+		source = &parsed.observation.Source
+		dest = &parsed.observation.Dest
+	case processFlowOutcomeError, processFlowOutcomeSkip:
+		fallthrough
+	default:
 		return parsed
 	}
-	if err := resolve(ctx, parsed.event.Source); err != nil {
+
+	if err := resolveWorkload(ctx, source); err != nil {
 		return resolveOutcome("source", err)
 	}
-	if err := resolve(ctx, parsed.event.Dest); err != nil {
+	if err := resolveWorkload(ctx, dest); err != nil {
 		return resolveOutcome("destination", err)
 	}
+
+	// in case of learning event there are no other things to do.
+	if parsed.outcome == processFlowOutcomeViolation {
+		if err := resolveViolationDenyingPolicy(ctx, resolvePolicy, &parsed.observation); err != nil {
+			return processFlowError(err)
+		}
+	}
+
 	return parsed
 }
 

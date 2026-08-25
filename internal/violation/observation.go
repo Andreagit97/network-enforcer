@@ -9,6 +9,7 @@ package violation
 
 import (
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
+	networkingv1 "k8s.io/api/networking/v1"
 )
 
 // Observation is the common in-flight representation produced by the backend
@@ -34,4 +35,8 @@ type Observation struct {
 	// and at that point there is no policy to inherit a backend from. It is
 	// emitted to OTel and never stored.
 	Provider securityv1alpha1.PolicyBackend
+
+	// Direction is necessary to understand if the violation happened at
+	// the source (egress) or destination (ingress)
+	Direction networkingv1.PolicyType
 }

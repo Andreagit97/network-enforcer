@@ -107,7 +107,7 @@ func generateViolationObservation(
 			Dest:      dest,
 			Protocol:  protocol,
 			// todo!: the real fix here is to turn all the `dstPort` reference into int32.
-			//nolint:gosec // dstPort is always in the range 0 - 65536
+			//nolint:gosec // dstPort is always in the range 0 - 65535
 			DstPort:                int32(dstPort),
 			Action:                 securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
 			DenyingPolicyNamespace: workload.Namespace,

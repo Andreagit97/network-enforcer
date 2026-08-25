@@ -2,10 +2,12 @@ package e2e_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
+	netypes "github.com/rancher-sandbox/network-enforcer/internal/types"
 	networkingv1 "k8s.io/api/networking/v1"
 
 	"github.com/stretchr/testify/assert"
@@ -13,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -86,6 +89,16 @@ func TestKubernetesFlow(t *testing.T) {
 			}).
 		Assess("Check violations in monitor mode", assessViolationsInMonitorMode).
 		Assess("Check proposals are not regenerated in monitor mode", assessProposalsAreNotRegenerated).
+		Assess("Check NetworkPolicies are created in protect mode", assessKubernetesPoliciesAreCreated).
+		Assess("Send traffic to UDP service in protect mode",
+			func(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
+				return assertPacketBlockedFromClient(ctx, t, corev1.ProtocolUDP, simpleAppUDPServicePort)
+			}).
+		Assess("Check violations are reported", assessViolationInProtectMode).
+		Assess("Check TCP traffic is still allowed",
+			func(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
+				return assertPacketSentFromClient(ctx, t, corev1.ProtocolTCP, simpleAppTCPServicePort)
+			}).
 		Teardown(teardownSimpleAppWorkload).
 		Teardown(teardownTestNamespace).
 		Feature()
@@ -260,6 +273,31 @@ func assessPolicyProposalsPromoted(ctx context.Context, t *testing.T, _ *envconf
 	return context.WithValue(ctx, key("policies"), policies)
 }
 
+func assertViolation(t *testing.T,
+	policyNamespacedName types.NamespacedName,
+	action securityv1alpha1.WorkloadNetworkPolicyMode,
+	violation securityv1alpha1.ViolationRecord,
+) {
+	t.Helper()
+
+	// in our test the policy and the workloads live all in the same namespace
+	policyNamespace := policyNamespacedName.Namespace
+	require.Equal(t, policyNamespacedName.Name, violation.DenyingPolicyName)
+	require.Equal(t, policyNamespace, violation.DenyingPolicyNamespace)
+
+	require.Equal(t, simpleAppClientDeploymentName, violation.Source.OwnerName)
+	require.Equal(t, securityv1alpha1.WorkloadKindDeployment, violation.Source.OwnerKind)
+	require.Equal(t, policyNamespace, violation.Source.Namespace)
+
+	require.Equal(t, simpleAppServerDeploymentName, violation.Dest.OwnerName)
+	require.Equal(t, securityv1alpha1.WorkloadKindDeployment, violation.Dest.OwnerKind)
+	require.Equal(t, policyNamespace, violation.Dest.Namespace)
+
+	require.Equal(t, corev1.ProtocolUDP, violation.Protocol)
+	require.Equal(t, simpleAppUDPServerPort, violation.DstPort)
+	require.Equal(t, action, violation.Action)
+}
+
 func assessViolationsInMonitorMode(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
 	storedPolicies := ctx.Value(key("policies")).([]securityv1alpha1.WorkloadNetworkPolicy)
 	client := getSecurityV1Alpha1Client(ctx)
@@ -288,23 +326,12 @@ func assessViolationsInMonitorMode(ctx context.Context, t *testing.T, _ *envconf
 		}, defaultOperationTimeout, 1*time.Second)
 
 		// Both ingress and egress policy should have a violation since the traffic is flowing in the cluster.
-		namespace := getNamespace(ctx)
 		require.Len(t, policy.Status.Violations, 1)
 		require.Empty(t, policy.Status.AcknowledgedViolations)
 		require.Equal(t, int64(1), policy.Status.ViolationCount)
 		require.Equal(t, int64(1), policy.Status.ActiveViolationCount)
 		violation := policy.Status.Violations[0]
-		require.Equal(t, simpleAppClientDeploymentName, violation.Source.OwnerName)
-		require.Equal(t, securityv1alpha1.WorkloadKindDeployment, violation.Source.OwnerKind)
-		require.Equal(t, namespace, violation.Source.Namespace)
-		require.Equal(t, simpleAppServerDeploymentName, violation.Dest.OwnerName)
-		require.Equal(t, securityv1alpha1.WorkloadKindDeployment, violation.Dest.OwnerKind)
-		require.Equal(t, namespace, violation.Dest.Namespace)
-		require.Equal(t, corev1.ProtocolUDP, violation.Protocol)
-		require.Equal(t, simpleAppUDPServerPort, violation.DstPort)
-		require.Equal(t, securityv1alpha1.WorkloadNetworkPolicyModeMonitor, violation.Action)
-		require.Equal(t, policy.Name, violation.DenyingPolicyName)
-		require.Equal(t, policy.Namespace, violation.DenyingPolicyNamespace)
+		assertViolation(t, policy.NamespacedName(), securityv1alpha1.WorkloadNetworkPolicyModeMonitor, violation)
 	}
 	return ctx
 }
@@ -322,6 +349,122 @@ func assessProposalsAreNotRegenerated(ctx context.Context, t *testing.T, _ *envc
 			// the error should be always not found
 			return !apierrors.IsNotFound(client.Get(ctx, proposal.Name, proposal.Namespace, &p))
 		}, neverAssertionTime, 1*time.Second, "Network policy proposal %q is created, but it should not be", proposal.NamespacedName().String())
+	}
+	return ctx
+}
+
+func assessKubernetesPoliciesAreCreated(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
+	storedPolicies := ctx.Value(key("policies")).([]securityv1alpha1.WorkloadNetworkPolicy)
+	client := getSecurityV1Alpha1Client(ctx)
+
+	// For each policy we change mode to protect
+	for _, policy := range storedPolicies {
+		require.Eventually(t, func() bool {
+			if err := client.Get(ctx, policy.Name, policy.Namespace, &policy); err != nil {
+				t.Logf("failed to get network policy %q: %v", policy.NamespacedName().String(), err)
+				return false
+			}
+			policy.Spec.Mode = securityv1alpha1.WorkloadNetworkPolicyModeProtect
+			if err := client.Update(ctx, &policy); err != nil {
+				t.Logf("failed to update network policy %q: %v", policy.NamespacedName().String(), err)
+				return false
+			}
+			return true
+		}, defaultOperationTimeout, 1*time.Second)
+	}
+
+	// Now we check the k8s network policies are created
+	// we want to do it in a separate for loop so that k8s network policies are created independently
+	for _, policy := range storedPolicies {
+		var k8sPolicy networkingv1.NetworkPolicy
+		require.Eventually(t, func() bool {
+			if err := client.Get(ctx, policy.Name, policy.Namespace, &k8sPolicy); err != nil {
+				t.Logf("failed to get k8s network policy %q: %v", policy.NamespacedName().String(), err)
+				return false
+			}
+			return true
+		}, defaultOperationTimeout, 1*time.Second)
+
+		require.Equal(
+			t,
+			*policy.Spec.Kubernetes,
+			k8sPolicy.Spec,
+			"Network policy %q spec is not equal to the expected spec",
+			policy.NamespacedName().String(),
+		)
+
+		require.Equal(
+			t,
+			[]metav1.OwnerReference{{
+				APIVersion:         securityv1alpha1.GroupVersion.String(),
+				Kind:               "WorkloadNetworkPolicy",
+				Name:               policy.Name,
+				UID:                policy.UID,
+				Controller:         func(b bool) *bool { return &b }(true),
+				BlockOwnerDeletion: func(b bool) *bool { return &b }(true),
+			}},
+			k8sPolicy.OwnerReferences,
+			"K8s Network policy associated with %q doesn't contain the expected owner references",
+			policy.NamespacedName().String(),
+		)
+	}
+	return ctx
+}
+
+func assessViolationInProtectMode(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
+	// todo!: remove this when we support Calico
+	if loadSuiteConfig().ProviderName() == string(netypes.ProviderCalico) {
+		t.Skip("Skipping assert violations for calico")
+	}
+
+	storedPolicies := ctx.Value(key("policies")).([]securityv1alpha1.WorkloadNetworkPolicy)
+	client := getSecurityV1Alpha1Client(ctx)
+
+	for _, policy := range storedPolicies {
+		if slices.Contains(policy.Spec.Kubernetes.PolicyTypes, networkingv1.PolicyTypeEgress) {
+			// for the egress policy we expect a violation
+			require.Eventually(t, func() bool {
+				if err := client.Get(ctx, policy.Name, policy.Namespace, &policy); err != nil {
+					return false
+				}
+				t.Logf("found violations in egress policy %q: %v",
+					policy.NamespacedName().String(), policy.Status.Violations)
+
+				// we should have 2 violations, one in monitor and one in protect
+				return len(policy.Status.Violations) == 2
+				// even if the sync is pretty fast in e2e test (~3s)
+				// the scraper will receive violations with a certain interval from the CNI (e.g. see `calicoAggregationInterval`)
+				// for this reason we keep the timeout pretty high.
+			}, defaultOperationTimeout, 1*time.Second)
+
+			// Assert some fields on the violation
+			require.Len(t, policy.Status.Violations, 2)
+			require.GreaterOrEqual(t, policy.Status.ViolationCount, int64(2))
+			require.Equal(t, int64(2), policy.Status.ActiveViolationCount)
+			require.Equal(t, int64(2), policy.Status.ViolationCount)
+
+			// Even if the protect violation is generated after the monitor one, some CNI report the timestamp
+			// as the starting time of the flow rather then the time the packet was dropped, so here we don't know
+			// the order of the violations, it probably depends on the CNI.
+			protectIndex := -1
+			for i := range policy.Status.Violations {
+				if policy.Status.Violations[i].Action == securityv1alpha1.WorkloadNetworkPolicyModeProtect {
+					protectIndex = i
+					break
+				}
+			}
+			require.NotEqual(t, -1, protectIndex, "no violation with action 'protect' found")
+			violation := policy.Status.Violations[protectIndex]
+			assertViolation(t, policy.NamespacedName(), securityv1alpha1.WorkloadNetworkPolicyModeProtect, violation)
+		} else {
+			require.Never(t, func() bool {
+				if err := client.Get(ctx, policy.Name, policy.Namespace, &policy); err != nil {
+					return false
+				}
+				// we should only have monitor violations for ingress
+				return len(policy.Status.Violations) != 1
+			}, 2*getSuiteConfig(ctx).wnpStatusUpdateInterval, 1*time.Second)
+		}
 	}
 	return ctx
 }

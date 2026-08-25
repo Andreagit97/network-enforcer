@@ -93,7 +93,8 @@ func (s *CalicoScraper) stream(ctx context.Context, successfulConnection *bool) 
 		}
 		*successfulConnection = true
 
-		result := resolveParsedFlow(ctx, s.resolve, parseCalicoFlow(flowResult))
+		result := resolveParsedFlow(ctx, s.resolve, nil, parseCalicoFlow(flowResult))
+		//nolint:exhaustive // implement `processFlowOutcomeViolation`
 		switch result.outcome {
 		case processFlowOutcomeSkip:
 			// nothing; continue
