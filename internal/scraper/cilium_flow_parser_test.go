@@ -66,12 +66,28 @@ func TestParseCiliumFlow(t *testing.T) {
 			processFlowResult: processFlowSkip(),
 		},
 		{
+			name: "dropped_reason_different_from_policy_denied",
+			flow: &flowpb.Flow{
+				// DROPPED events don't have the `is_reply` field
+				// IsReply:
+				Time:             timestamppb.New(flowTimestamp),
+				Verdict:          flowpb.Verdict_DROPPED,
+				DropReasonDesc:   hubbleObserver.DropReason_INVALID_IPV6_EXTENSION_HEADER,
+				TrafficDirection: hubbleObserver.TrafficDirection_INGRESS,
+				L4:               &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
+				Source:           endpoint("source-deploy", "Deployment"),
+				Destination:      endpoint("dest-deploy", "Deployment"),
+			},
+			processFlowResult: processFlowSkip(),
+		},
+		{
 			name: "dropped_ingress_flow_records_violation",
 			flow: &flowpb.Flow{
 				// DROPPED events don't have the `is_reply` field
 				// IsReply:
 				Time:             timestamppb.New(flowTimestamp),
 				Verdict:          flowpb.Verdict_DROPPED,
+				DropReasonDesc:   hubbleObserver.DropReason_POLICY_DENIED,
 				TrafficDirection: hubbleObserver.TrafficDirection_INGRESS,
 				L4:               &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
 				Source:           endpoint("source-deploy", "Deployment"),
@@ -105,6 +121,7 @@ func TestParseCiliumFlow(t *testing.T) {
 			flow: &flowpb.Flow{
 				Time:             timestamppb.New(flowTimestamp),
 				Verdict:          flowpb.Verdict_DROPPED,
+				DropReasonDesc:   hubbleObserver.DropReason_POLICY_DENY,
 				TrafficDirection: hubbleObserver.TrafficDirection_EGRESS,
 				L4:               &flowpb.Layer4{Protocol: &flowpb.Layer4_UDP{UDP: &flowpb.UDP{DestinationPort: 5353}}},
 				Source:           endpoint("source-sts", "StatefulSet"),
@@ -137,6 +154,7 @@ func TestParseCiliumFlow(t *testing.T) {
 			name: "dropped_flow_unknown_direction_errors",
 			flow: &flowpb.Flow{
 				Verdict:          flowpb.Verdict_DROPPED,
+				DropReasonDesc:   hubbleObserver.DropReason_POLICY_DENY,
 				TrafficDirection: hubbleObserver.TrafficDirection_TRAFFIC_DIRECTION_UNKNOWN,
 				L4:               &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
 				Source:           endpoint("source-deploy", "Deployment"),
@@ -451,6 +469,7 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 			flow: flowResponse(&flowpb.Flow{
 				Time:             timestamppb.New(flowTimestamp),
 				Verdict:          flowpb.Verdict_DROPPED,
+				DropReasonDesc:   hubbleObserver.DropReason_POLICY_DENY,
 				TrafficDirection: hubbleObserver.TrafficDirection_INGRESS,
 				L4:               &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
 				Source: &hubbleObserver.Endpoint{
@@ -492,6 +511,7 @@ func TestProcessFlowResolvesSelectorsWithFakeClient(t *testing.T) {
 			flow: flowResponse(&flowpb.Flow{
 				Time:             timestamppb.New(flowTimestamp),
 				Verdict:          flowpb.Verdict_DROPPED,
+				DropReasonDesc:   hubbleObserver.DropReason_POLICY_DENY,
 				TrafficDirection: hubbleObserver.TrafficDirection_EGRESS,
 				L4:               &flowpb.Layer4{Protocol: &flowpb.Layer4_TCP{TCP: &flowpb.TCP{DestinationPort: 8080}}},
 				Source: &hubbleObserver.Endpoint{

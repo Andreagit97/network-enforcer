@@ -169,6 +169,17 @@ func parseCiliumFlowResponse(flow *flowpb.Flow) processFlowResult {
 	}
 
 	if flow.GetVerdict() == hubbleObserver.Verdict_DROPPED {
+		// Dropped doesn't necessarily mean a policy dropped the traffic, there could be
+		// other reasons (e.g. invalid IPV6 extension header). So we need to check the
+		// drop reason. In case of drops not related to a policy, we skip the flow for now.
+		//
+		// `DropReason_POLICY_DENY` -> a policy explicitly denied the traffic.
+		// `DropReason_POLICY_DENIED` -> the packet was implicitly dropped because there were no policies allowing it.
+		if flow.GetDropReasonDesc() != hubbleObserver.DropReason_POLICY_DENIED &&
+			flow.GetDropReasonDesc() != hubbleObserver.DropReason_POLICY_DENY {
+			return processFlowSkip()
+		}
+
 		// we need the direction to determine if the violation happens at the source or destination
 		var direction networkingv1.PolicyType
 		switch flow.GetTrafficDirection() {
