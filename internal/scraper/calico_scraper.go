@@ -8,6 +8,7 @@ import (
 
 	pb "github.com/rancher-sandbox/network-enforcer/internal/scraper/goldmane"
 	"github.com/rancher-sandbox/network-enforcer/internal/tlsutil"
+	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	"google.golang.org/grpc"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -23,6 +24,7 @@ type CalicoScraperConfig struct {
 	Endpoint             string
 	EnqueueLearningEvent LearningEnqueueFunc
 	Logger               *slog.Logger
+	ViolationBuffer      *violation.Buffer
 }
 
 type CalicoScraper struct {
@@ -72,12 +74,12 @@ func (s *CalicoScraper) stream(ctx context.Context, successfulConnection *bool) 
 	req := &pb.FlowStreamRequest{
 		StartTimeGte: 0,
 		Filter: &pb.Filter{
-			Actions: []pb.Action{pb.Action_Allow},
+			Actions: []pb.Action{pb.Action_Allow, pb.Action_Deny},
 		},
 		AggregationInterval: calicoAggregationInterval,
 	}
 
-	s.Logger.InfoContext(ctx, "Starting to watch Calico allowed flows from Goldmane")
+	s.Logger.InfoContext(ctx, "Starting to watch Calico flows from Goldmane")
 	innerClient, err := pb.NewFlowsClient(conn).Stream(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to stream flows from Goldmane: %w", err)
@@ -93,8 +95,7 @@ func (s *CalicoScraper) stream(ctx context.Context, successfulConnection *bool) 
 		}
 		*successfulConnection = true
 
-		result := resolveParsedFlow(ctx, s.resolve, nil, parseCalicoFlow(flowResult))
-		//nolint:exhaustive // implement `processFlowOutcomeViolation`
+		result := resolveParsedFlow(ctx, s.resolve, bindResolveDenyingPolicy(s.Client), parseCalicoFlow(flowResult))
 		switch result.outcome {
 		case processFlowOutcomeSkip:
 			// nothing; continue
@@ -106,6 +107,11 @@ func (s *CalicoScraper) stream(ctx context.Context, successfulConnection *bool) 
 		case processFlowOutcomeEnqueue:
 			if !s.EnqueueLearningEvent(result.event) {
 				s.Logger.WarnContext(ctx, "Failed to enqueue learning event, channel is full")
+			}
+		case processFlowOutcomeViolation:
+			s.Logger.InfoContext(ctx, "Received violation", "violation", result.observation)
+			if s.ViolationBuffer.Record(result.observation) {
+				s.Logger.WarnContext(ctx, "Violation buffer is full, dropped the oldest violation")
 			}
 		default:
 			s.Logger.ErrorContext(ctx, "Failed to process flow",

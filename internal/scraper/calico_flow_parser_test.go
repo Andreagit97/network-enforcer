@@ -3,14 +3,17 @@ package scraper
 import (
 	"errors"
 	"testing"
+	"time"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	pb "github.com/rancher-sandbox/network-enforcer/internal/scraper/goldmane"
 	"github.com/rancher-sandbox/network-enforcer/internal/testutil"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
+	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -18,8 +21,12 @@ import (
 
 const defaultCalicoTestNamespace = "default"
 
+func calicoTestFlowTime() time.Time {
+	return time.Date(2026, 8, 24, 10, 11, 12, 0, time.UTC)
+}
+
 func calicoFlowResult(key *pb.FlowKey) *pb.FlowResult {
-	return &pb.FlowResult{Flow: &pb.Flow{Key: key}}
+	return &pb.FlowResult{Flow: &pb.Flow{Key: key, StartTime: calicoTestFlowTime().Unix()}}
 }
 
 func allowDstWorkloadKey() *pb.FlowKey {
@@ -34,6 +41,46 @@ func allowDstWorkloadKey() *pb.FlowKey {
 		DestNamespace:   defaultCalicoTestNamespace,
 		DestPort:        18080,
 		Proto:           "TCP",
+	}
+}
+
+func denyDstWorkloadKey() *pb.FlowKey {
+	key := allowDstWorkloadKey()
+	key.Action = pb.Action_Deny
+	return key
+}
+
+func denySrcWorkloadKey() *pb.FlowKey {
+	key := denyDstWorkloadKey()
+	key.Reporter = pb.Reporter_Src
+	return key
+}
+
+func calicoProtectObservation(
+	direction networkingv1.PolicyType,
+	protocol corev1.Protocol,
+	dstPort int32,
+	denyingName, denyingNamespace string,
+) violation.Observation {
+	return violation.Observation{
+		Provider:  securityv1alpha1.PolicyBackendKubernetes,
+		Direction: direction,
+		ViolationInfo: securityv1alpha1.ViolationInfo{
+			Timestamp: metav1.NewTime(calicoTestFlowTime()),
+			Source: securityv1alpha1.WorkloadRef{
+				Namespace: defaultCalicoTestNamespace,
+				OwnerName: "http-client-abc123-*",
+			},
+			Dest: securityv1alpha1.WorkloadRef{
+				Namespace: defaultCalicoTestNamespace,
+				OwnerName: "http-server-def456-*",
+			},
+			Protocol:               protocol,
+			DstPort:                dstPort,
+			Action:                 securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+			DenyingPolicyNamespace: denyingNamespace,
+			DenyingPolicyName:      denyingName,
+		},
 	}
 }
 
@@ -58,7 +105,7 @@ func TestParseCalicoFlow(t *testing.T) {
 			processFlowResult: testProcessFlowOutcomeError,
 		},
 		{
-			name: "src_reporter_is_skipped",
+			name: "src_reporter_allow_is_skipped",
 			flow: calicoFlowResult(func() *pb.FlowKey {
 				key := allowDstWorkloadKey()
 				key.Reporter = pb.Reporter_Src
@@ -67,13 +114,87 @@ func TestParseCalicoFlow(t *testing.T) {
 			processFlowResult: processFlowSkip(),
 		},
 		{
-			name: "non_allow_action_is_skipped",
+			name: "pass_action_is_skipped",
 			flow: calicoFlowResult(func() *pb.FlowKey {
 				key := allowDstWorkloadKey()
-				key.Action = pb.Action_Deny
+				key.Action = pb.Action_Pass
 				return key
 			}()),
 			processFlowResult: processFlowSkip(),
+		},
+		{
+			name: "deny_dst_flow_records_ingress_violation",
+			flow: calicoFlowResult(denyDstWorkloadKey()),
+			processFlowResult: processFlowRecordViolation(calicoProtectObservation(
+				networkingv1.PolicyTypeIngress,
+				corev1.ProtocolTCP,
+				18080,
+				"",
+				"",
+			)),
+		},
+		{
+			name: "deny_src_flow_records_egress_violation",
+			flow: calicoFlowResult(func() *pb.FlowKey {
+				key := denySrcWorkloadKey()
+				key.DestPort = 18081
+				key.Proto = "UDP"
+				return key
+			}()),
+			processFlowResult: processFlowRecordViolation(calicoProtectObservation(
+				networkingv1.PolicyTypeEgress,
+				corev1.ProtocolUDP,
+				18081,
+				"",
+				"",
+			)),
+		},
+		{
+			name: "deny_flow_uses_networkpolicy_hit_name",
+			flow: calicoFlowResult(func() *pb.FlowKey {
+				key := denyDstWorkloadKey()
+				key.Policies = &pb.PolicyTrace{
+					EnforcedPolicies: []*pb.PolicyHit{{
+						Kind:      pb.PolicyKind_NetworkPolicy,
+						Namespace: defaultCalicoTestNamespace,
+						Name:      "deployment-http-server-ingress",
+						Action:    pb.Action_Deny,
+					}},
+				}
+				return key
+			}()),
+			processFlowResult: processFlowRecordViolation(calicoProtectObservation(
+				networkingv1.PolicyTypeIngress,
+				corev1.ProtocolTCP,
+				18080,
+				"deployment-http-server-ingress",
+				defaultCalicoTestNamespace,
+			)),
+		},
+		{
+			name: "deny_flow_uses_end_of_tier_trigger_name",
+			flow: calicoFlowResult(func() *pb.FlowKey {
+				key := denySrcWorkloadKey()
+				key.Policies = &pb.PolicyTrace{
+					EnforcedPolicies: []*pb.PolicyHit{{
+						Kind:   pb.PolicyKind_EndOfTier,
+						Action: pb.Action_Deny,
+						Trigger: &pb.PolicyHit{
+							Kind:      pb.PolicyKind_NetworkPolicy,
+							Namespace: defaultCalicoTestNamespace,
+							Name:      "deployment-http-client-egress",
+						},
+					}},
+				}
+				return key
+			}()),
+			processFlowResult: processFlowRecordViolation(calicoProtectObservation(
+				networkingv1.PolicyTypeEgress,
+				corev1.ProtocolTCP,
+				18080,
+				"deployment-http-client-egress",
+				defaultCalicoTestNamespace,
+			)),
 		},
 		{
 			name: "non_workload_destination_is_skipped",
@@ -163,6 +284,9 @@ func TestParseCalicoFlow(t *testing.T) {
 			require.Equal(t, tc.processFlowResult.outcome, result.outcome)
 			if tc.processFlowResult.outcome == processFlowOutcomeEnqueue {
 				require.Equal(t, tc.processFlowResult.event, result.event)
+			}
+			if tc.processFlowResult.outcome == processFlowOutcomeViolation {
+				require.Equal(t, tc.processFlowResult.observation, result.observation)
 			}
 		})
 	}
@@ -273,9 +397,36 @@ func TestProcessCalicoFlowResolvesWorkloadsWithFakeClient(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, securityv1alpha1.AddToScheme(scheme))
+
+	sourcePolicyName := "deployment-http-client-egress"
+	dstPolicyName := "deployment-http-server-ingress"
+	sourceSelector := metav1.LabelSelector{MatchLabels: map[string]string{"app": "http-client"}}
+	dstSelector := metav1.LabelSelector{MatchLabels: map[string]string{"app": "http-server"}}
+
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(clientPod, serverPod, jobPod, clientDeploy, serverDeploy, stsPod, dsPod, sts, ds).
+		WithObjects(
+			clientPod, serverPod, jobPod, clientDeploy, serverDeploy, stsPod, dsPod, sts, ds,
+			&securityv1alpha1.WorkloadNetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: sourcePolicyName, Namespace: defaultCalicoTestNamespace},
+				Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
+					PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+						Backend:    securityv1alpha1.PolicyBackendKubernetes,
+						Kubernetes: &networkingv1.NetworkPolicySpec{PodSelector: sourceSelector},
+					},
+				},
+			},
+			&securityv1alpha1.WorkloadNetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: dstPolicyName, Namespace: defaultCalicoTestNamespace},
+				Spec: securityv1alpha1.WorkloadNetworkPolicySpec{
+					PolicyBackendSpec: securityv1alpha1.PolicyBackendSpec{
+						Backend:    securityv1alpha1.PolicyBackendKubernetes,
+						Kubernetes: &networkingv1.NetworkPolicySpec{PodSelector: dstSelector},
+					},
+				},
+			},
+		).
 		Build()
 
 	s := NewCalicoScraper(CalicoScraperConfig{
@@ -285,11 +436,17 @@ func TestProcessCalicoFlowResolvesWorkloadsWithFakeClient(t *testing.T) {
 		Logger:               testutil.NewTestLogger(t),
 	})
 
+	deploySource := &securityv1alpha1.WorkloadRef{
+		Namespace: defaultCalicoTestNamespace,
+		OwnerName: "http-client",
+		OwnerKind: securityv1alpha1.WorkloadKindDeployment,
+		Selector:  sourceSelector,
+	}
 	deployDest := &securityv1alpha1.WorkloadRef{
 		Namespace: defaultCalicoTestNamespace,
 		OwnerName: "http-server",
 		OwnerKind: securityv1alpha1.WorkloadKindDeployment,
-		Selector:  metav1.LabelSelector{MatchLabels: map[string]string{"app": "http-server"}},
+		Selector:  dstSelector,
 	}
 
 	tests := []struct {
@@ -301,12 +458,7 @@ func TestProcessCalicoFlowResolvesWorkloadsWithFakeClient(t *testing.T) {
 			name: "maps_generate_name_to_kubernetes_event",
 			flow: calicoFlowResult(allowDstWorkloadKey()),
 			processFlowResult: processFlowEnqueue(types.LearningEvent{
-				Source: &securityv1alpha1.WorkloadRef{
-					Namespace: defaultCalicoTestNamespace,
-					OwnerName: "http-client",
-					OwnerKind: securityv1alpha1.WorkloadKindDeployment,
-					Selector:  metav1.LabelSelector{MatchLabels: map[string]string{"app": "http-client"}},
-				},
+				Source:   deploySource,
 				Dest:     deployDest,
 				DstPort:  18080,
 				Protocol: corev1.ProtocolTCP,
@@ -380,15 +532,59 @@ func TestProcessCalicoFlowResolvesWorkloadsWithFakeClient(t *testing.T) {
 				Backend:  securityv1alpha1.PolicyBackendKubernetes,
 			}),
 		},
+		{
+			name: "deny_ingress_resolves_violation_policy_on_destination",
+			flow: calicoFlowResult(denyDstWorkloadKey()),
+			processFlowResult: processFlowRecordViolation(violation.Observation{
+				Provider:  securityv1alpha1.PolicyBackendKubernetes,
+				Direction: networkingv1.PolicyTypeIngress,
+				ViolationInfo: securityv1alpha1.ViolationInfo{
+					Timestamp:              metav1.NewTime(calicoTestFlowTime()),
+					Source:                 *deploySource,
+					Dest:                   *deployDest,
+					Protocol:               corev1.ProtocolTCP,
+					DstPort:                18080,
+					Action:                 securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+					DenyingPolicyNamespace: defaultCalicoTestNamespace,
+					DenyingPolicyName:      dstPolicyName,
+				},
+			}),
+		},
+		{
+			name: "deny_egress_resolves_violation_policy_on_source",
+			flow: calicoFlowResult(denySrcWorkloadKey()),
+			processFlowResult: processFlowRecordViolation(violation.Observation{
+				Provider:  securityv1alpha1.PolicyBackendKubernetes,
+				Direction: networkingv1.PolicyTypeEgress,
+				ViolationInfo: securityv1alpha1.ViolationInfo{
+					Timestamp:              metav1.NewTime(calicoTestFlowTime()),
+					Source:                 *deploySource,
+					Dest:                   *deployDest,
+					Protocol:               corev1.ProtocolTCP,
+					DstPort:                18080,
+					Action:                 securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+					DenyingPolicyNamespace: defaultCalicoTestNamespace,
+					DenyingPolicyName:      sourcePolicyName,
+				},
+			}),
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			result := resolveParsedFlow(t.Context(), s.resolve, nil, parseCalicoFlow(tc.flow))
+			result := resolveParsedFlow(
+				t.Context(),
+				s.resolve,
+				bindResolveDenyingPolicy(s.Client),
+				parseCalicoFlow(tc.flow),
+			)
 			require.Equal(t, tc.processFlowResult.outcome, result.outcome)
 			if tc.processFlowResult.outcome == processFlowOutcomeEnqueue {
 				require.Equal(t, tc.processFlowResult.event, result.event)
+			}
+			if tc.processFlowResult.outcome == processFlowOutcomeViolation {
+				require.Equal(t, tc.processFlowResult.observation, result.observation)
 			}
 		})
 	}

@@ -227,13 +227,6 @@ func (s *CiliumScraper) resolve(ctx context.Context, ref *securityv1alpha1.Workl
 	return completeSelector(ctx, s.Client, ref)
 }
 
-func (s *CiliumScraper) resolveDenyingPolicy(
-	ctx context.Context,
-	ref *securityv1alpha1.WorkloadRef,
-) (k8stypes.NamespacedName, error) {
-	return workload.ResolveDenyingPolicy(ctx, s.Client, ref)
-}
-
 func (s *CiliumScraper) resolvePod(ctx context.Context, ref *securityv1alpha1.WorkloadRef) error {
 	resolved, err := workload.Get(ctx, s.Client, k8stypes.NamespacedName{
 		Namespace: ref.Namespace,
@@ -265,7 +258,12 @@ func (s *CiliumScraper) processFlow(
 		if flowResponse == nil {
 			return processFlowError(errors.New("found nil response flow"))
 		}
-		return resolveParsedFlow(ctx, s.resolve, s.resolveDenyingPolicy, parseCiliumFlowResponse(flowResponse))
+		return resolveParsedFlow(
+			ctx,
+			s.resolve,
+			bindResolveDenyingPolicy(s.Client),
+			parseCiliumFlowResponse(flowResponse),
+		)
 	case *hubbleObserver.GetFlowsResponse_LostEvents:
 		flowLost := flow.GetLostEvents()
 		if flowLost == nil {

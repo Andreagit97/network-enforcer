@@ -13,7 +13,7 @@ import (
 )
 
 // Observation is the common in-flight representation produced by the backend
-// scrapers (Istio today; Cilium/Calico later) and consumed by the shared
+// scrapers (Istio, Cilium, Calico) and consumed by the shared
 // violation buffer. Each scraper converts its provider-specific event (OTLP
 // log for Istio, gRPC flow for Cilium/Calico) into this format, reusing the
 // fields of the persisted ViolationRecord (via the embedded ViolationInfo)

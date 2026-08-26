@@ -5,12 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	pb "github.com/rancher-sandbox/network-enforcer/internal/scraper/goldmane"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
+	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	"github.com/rancher-sandbox/network-enforcer/internal/workload"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -41,29 +45,90 @@ func parseCalicoFlow(flowResult *pb.FlowResult) processFlowResult {
 		return processFlowError(err)
 	}
 
+	source := &securityv1alpha1.WorkloadRef{
+		Namespace: key.GetSourceNamespace(),
+		OwnerName: key.GetSourceName(),
+	}
+	dest := &securityv1alpha1.WorkloadRef{
+		Namespace: key.GetDestNamespace(),
+		OwnerName: key.GetDestName(),
+	}
+
+	if key.GetAction() == pb.Action_Deny {
+		var direction networkingv1.PolicyType
+		switch key.GetReporter() { //nolint:exhaustive // only Src/Dst map to policy directions
+		case pb.Reporter_Src:
+			direction = networkingv1.PolicyTypeEgress
+		case pb.Reporter_Dst:
+			direction = networkingv1.PolicyTypeIngress
+		default:
+			return processFlowError(errors.New("found violation flow with unknown reporter"))
+		}
+
+		denyingPolicyName, denyingPolicyNamespace := getDenyingPolicy(key)
+		return processFlowRecordViolation(violation.Observation{
+			Provider:  securityv1alpha1.PolicyBackendKubernetes,
+			Direction: direction,
+			ViolationInfo: securityv1alpha1.ViolationInfo{
+				Timestamp:              calicoViolationTimestamp(flow),
+				Source:                 *source,
+				Dest:                   *dest,
+				Protocol:               proto,
+				DstPort:                int32(dstPort), //nolint:gosec // dest port is validated to 1-65535
+				Action:                 securityv1alpha1.WorkloadNetworkPolicyModeProtect,
+				DenyingPolicyNamespace: denyingPolicyNamespace,
+				DenyingPolicyName:      denyingPolicyName,
+			},
+		})
+	}
+
 	return processFlowEnqueue(types.LearningEvent{
-		Source: &securityv1alpha1.WorkloadRef{
-			Namespace: key.GetSourceNamespace(),
-			OwnerName: key.GetSourceName(),
-		},
-		Dest: &securityv1alpha1.WorkloadRef{
-			Namespace: key.GetDestNamespace(),
-			OwnerName: key.GetDestName(),
-		},
+		Source:   source,
+		Dest:     dest,
 		DstPort:  int(dstPort),
 		Protocol: proto,
 		Backend:  securityv1alpha1.PolicyBackendKubernetes,
 	})
 }
 
+func calicoViolationTimestamp(flow *pb.Flow) metav1.Time {
+	if ts := flow.GetStartTime(); ts > 0 {
+		return metav1.NewTime(time.Unix(ts, 0).UTC())
+	}
+	return metav1.Now()
+}
+
+// getDenyingPolicy extracts the Kubernetes NetworkPolicy that denied the
+// flow, when Goldmane reports it. For native K8s NetworkPolicy the hit may be
+// a direct Deny or an EndOfTier Deny whose trigger is the selecting policy.
+// We don't support CalicoNetworkPolicy and GlobalNetworkPolicy at the moment.
+func getDenyingPolicy(key *pb.FlowKey) (string, string) {
+	policyTrace := key.GetPolicies()
+	if policyTrace == nil {
+		return "", ""
+	}
+	for _, policy := range policyTrace.GetEnforcedPolicies() {
+		if policy.GetAction() != pb.Action_Deny {
+			continue
+		}
+		switch policy.GetKind() { //nolint:exhaustive // only Kubernetes NetworkPolicy is supported today
+		case pb.PolicyKind_NetworkPolicy:
+			if policy.GetName() != "" {
+				return policy.GetName(), policy.GetNamespace()
+			}
+		case pb.PolicyKind_EndOfTier:
+			trigger := policy.GetTrigger()
+			if trigger != nil && trigger.GetKind() == pb.PolicyKind_NetworkPolicy && trigger.GetName() != "" {
+				return trigger.GetName(), trigger.GetNamespace()
+			}
+		default:
+		}
+	}
+	return "", ""
+}
+
 func discardCalicoFlow(key *pb.FlowKey) bool {
 	if key == nil {
-		return true
-	}
-	if key.GetAction() != pb.Action_Allow {
-		return true
-	}
-	if key.GetReporter() != pb.Reporter_Dst {
 		return true
 	}
 	if key.GetSourceType() != pb.EndpointType_WorkloadEndpoint {
@@ -79,7 +144,18 @@ func discardCalicoFlow(key *pb.FlowKey) bool {
 		return true
 	}
 	port := key.GetDestPort()
-	return port < minValidPort || port > maxValidPort
+	if port < minValidPort || port > maxValidPort {
+		return true
+	}
+	switch key.GetAction() { //nolint:exhaustive // Pass and unspecified are unused
+	case pb.Action_Allow:
+		// Only destination-reported allows are used for learning to avoid duplicates.
+		return key.GetReporter() != pb.Reporter_Dst
+	case pb.Action_Deny:
+		return key.GetReporter() != pb.Reporter_Src && key.GetReporter() != pb.Reporter_Dst
+	default:
+		return true
+	}
 }
 
 func extractCalicoPortAndProtocol(key *pb.FlowKey) (int64, corev1.Protocol, error) {
