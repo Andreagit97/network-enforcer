@@ -29,7 +29,7 @@ func (r *LearningReconciler) updateProposal(
 			}
 		}
 
-		upsertIstioLearnedRule(proposal.Spec.Istio, evt.Source.Identity, strconv.Itoa(evt.DstPort))
+		upsertIstioLearnedRule(proposal.Spec.Istio, evt.Source.Identity, strconv.FormatInt(int64(evt.DstPort), 10))
 		return nil
 	}); err != nil {
 		return fmt.Errorf("create or update proposal %s/%s: %w", proposal.Namespace, proposal.Name, err)

@@ -89,7 +89,7 @@ const (
 type LearningEvent struct {
 	Source   *securityv1alpha1.WorkloadRef  `json:"source"`
 	Dest     *securityv1alpha1.WorkloadRef  `json:"dest"`
-	DstPort  int                            `json:"dst_port"`
+	DstPort  int32                          `json:"dst_port"`
 	Protocol corev1.Protocol                `json:"protocol"` // "TCP", "UDP"
 	Backend  securityv1alpha1.PolicyBackend `json:"backend"`
 }

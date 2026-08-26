@@ -177,7 +177,7 @@ func (s *IstioScraper) enqueueLearningEvent(ctx context.Context, attrs map[strin
 		return
 	}
 
-	dstPortInt, err := strconv.Atoi(dstPort)
+	dstPortInt, err := parsePort(dstPort)
 	if err != nil {
 		s.Logger.WarnContext(ctx, "Failed to parse destination port", "dstPort", dstPort, "error", err)
 		return

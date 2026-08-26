@@ -17,7 +17,7 @@ func (r *LearningReconciler) evaluateMonitorViolation(
 	peer *securityv1alpha1.WorkloadRef,
 	protocol corev1.Protocol,
 	direction networkingv1.PolicyType,
-	dstPort int,
+	dstPort int32,
 ) error {
 	policyPeer, policyPort := buildPeerAndPort(peer, protocol, dstPort)
 	spec := policy.Spec.Kubernetes
@@ -77,7 +77,7 @@ func (r *LearningReconciler) sendMonitorViolation(
 	peer *securityv1alpha1.WorkloadRef,
 	protocol corev1.Protocol,
 	direction networkingv1.PolicyType,
-	dstPort int,
+	dstPort int32,
 ) error {
 	obs := generateViolationObservation(policyName, workload, peer, protocol, direction, dstPort)
 	if r.violationBuffer.Record(obs) {
@@ -92,7 +92,7 @@ func generateViolationObservation(
 	peer *securityv1alpha1.WorkloadRef,
 	protocol corev1.Protocol,
 	direction networkingv1.PolicyType,
-	dstPort int,
+	dstPort int32,
 ) violation.Observation {
 	source := *workload
 	dest := *peer
@@ -102,13 +102,11 @@ func generateViolationObservation(
 
 	observation := violation.Observation{
 		ViolationInfo: securityv1alpha1.ViolationInfo{
-			Timestamp: metav1.NewTime(time.Now()),
-			Source:    source,
-			Dest:      dest,
-			Protocol:  protocol,
-			// todo!: the real fix here is to turn all the `dstPort` reference into int32.
-			//nolint:gosec // dstPort is always in the range 0 - 65535
-			DstPort:                int32(dstPort),
+			Timestamp:              metav1.NewTime(time.Now()),
+			Source:                 source,
+			Dest:                   dest,
+			Protocol:               protocol,
+			DstPort:                dstPort,
 			Action:                 securityv1alpha1.WorkloadNetworkPolicyModeMonitor,
 			DenyingPolicyNamespace: workload.Namespace,
 			DenyingPolicyName:      policyName,

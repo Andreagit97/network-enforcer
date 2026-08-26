@@ -86,7 +86,7 @@ func TestProcessKubernetesLearningEvent(t *testing.T) {
 		Selector:  metav1.LabelSelector{MatchLabels: map[string]string{"app": "backend"}},
 	}
 
-	newEvent := func(dstPort int, protocol corev1.Protocol) netypes.LearningEvent {
+	newEvent := func(dstPort int32, protocol corev1.Protocol) netypes.LearningEvent {
 		return netypes.LearningEvent{
 			Source:   frontendRef,
 			Dest:     backendRef,

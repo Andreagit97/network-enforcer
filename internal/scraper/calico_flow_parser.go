@@ -19,11 +19,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const (
-	minValidPort = 1
-	maxValidPort = 65535
-)
-
 func parseCalicoFlow(flowResult *pb.FlowResult) processFlowResult {
 	if flowResult == nil {
 		return processFlowError(errors.New("found nil flow result"))
@@ -74,7 +69,7 @@ func parseCalicoFlow(flowResult *pb.FlowResult) processFlowResult {
 				Source:                 *source,
 				Dest:                   *dest,
 				Protocol:               proto,
-				DstPort:                int32(dstPort), //nolint:gosec // dest port is validated to 1-65535
+				DstPort:                dstPort,
 				Action:                 securityv1alpha1.WorkloadNetworkPolicyModeProtect,
 				DenyingPolicyNamespace: denyingPolicyNamespace,
 				DenyingPolicyName:      denyingPolicyName,
@@ -85,7 +80,7 @@ func parseCalicoFlow(flowResult *pb.FlowResult) processFlowResult {
 	return processFlowEnqueue(types.LearningEvent{
 		Source:   source,
 		Dest:     dest,
-		DstPort:  int(dstPort),
+		DstPort:  dstPort,
 		Protocol: proto,
 		Backend:  securityv1alpha1.PolicyBackendKubernetes,
 	})
@@ -158,15 +153,23 @@ func discardCalicoFlow(key *pb.FlowKey) bool {
 	}
 }
 
-func extractCalicoPortAndProtocol(key *pb.FlowKey) (int64, corev1.Protocol, error) {
+func extractCalicoPortAndProtocol(key *pb.FlowKey) (int32, corev1.Protocol, error) {
+	var proto corev1.Protocol
 	switch strings.ToUpper(key.GetProto()) {
 	case string(corev1.ProtocolTCP):
-		return key.GetDestPort(), corev1.ProtocolTCP, nil
+		proto = corev1.ProtocolTCP
 	case string(corev1.ProtocolUDP):
-		return key.GetDestPort(), corev1.ProtocolUDP, nil
+		proto = corev1.ProtocolUDP
 	default:
 		return 0, "", fmt.Errorf("%w: %s", errUnsupportedProtocol, key.GetProto())
 	}
+	// `discardCalicoFlow` already dropped the flows with a port outside the
+	// 1 - 65535 range, this conversion is just an extra safety net.
+	dstPort, err := portToInt32(key.GetDestPort())
+	if err != nil {
+		return 0, "", err
+	}
+	return dstPort, proto, nil
 }
 
 // resolve maps a Goldmane aggregated name on ref into a supported WorkloadRef.
