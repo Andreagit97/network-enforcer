@@ -161,25 +161,25 @@ func (s *IstioScraper) Export(
 func (s *IstioScraper) enqueueLearningEvent(ctx context.Context, attrs map[string]string) {
 	dstPodName := attrs[dstNameKey]
 	dstNamespace := attrs[dstNamespaceKey]
-	dstPort := attrs[dstPortKey]
+	dstPortAttr := attrs[dstPortKey]
 	// Strip the `spiffe://` scheme as soon as we ingest the identity: the
 	// canonical principal form (Istio convention and our stored
 	// WorkloadRef.Identity) carries no prefix.
 	srcIdentity, hasSPIFFEPrefix := strings.CutPrefix(attrs[srcIdentityKey], spiffeURIPrefix)
-	if dstPodName == "" || dstNamespace == "" || dstPort == "" || !hasSPIFFEPrefix || srcIdentity == "" {
+	if dstPodName == "" || dstNamespace == "" || dstPortAttr == "" || !hasSPIFFEPrefix || srcIdentity == "" {
 		s.Logger.WarnContext(ctx, "Skipping learning event with missing required fields",
 			dstNameKey, dstPodName,
 			dstNamespaceKey, dstNamespace,
-			dstPortKey, dstPort,
+			dstPortKey, dstPortAttr,
 			srcIdentityKey, attrs[srcIdentityKey],
 			"attrs", attrs,
 		)
 		return
 	}
 
-	dstPortInt, err := parsePort(dstPort)
+	dstPort, err := parsePort(dstPortAttr)
 	if err != nil {
-		s.Logger.WarnContext(ctx, "Failed to parse destination port", "dstPort", dstPort, "error", err)
+		s.Logger.WarnContext(ctx, "Failed to parse destination port", "dstPort", dstPortAttr, "error", err)
 		return
 	}
 
@@ -210,7 +210,7 @@ func (s *IstioScraper) enqueueLearningEvent(ctx context.Context, attrs map[strin
 	learningEvent := types.LearningEvent{
 		Source:   &securityv1alpha1.WorkloadRef{Identity: srcIdentity},
 		Dest:     &dstWorkloadRef,
-		DstPort:  dstPortInt,
+		DstPort:  dstPort,
 		Protocol: corev1.ProtocolTCP, // the protocol is always TCP for Istio.
 		Backend:  securityv1alpha1.PolicyBackendIstio,
 	}

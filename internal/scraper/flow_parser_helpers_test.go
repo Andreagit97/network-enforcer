@@ -19,11 +19,11 @@ func TestPortToInt32(t *testing.T) {
 			want    int32
 			wantErr bool
 		}{
-			{name: "zero", port: 0, want: 0},
+			{name: "zero means unavailable", port: 0, want: 0},
 			{name: "valid port", port: 8080, want: 8080},
-			{name: "max port", port: 65535, want: 65535},
-			{name: "max int32", port: math.MaxInt32, want: math.MaxInt32},
-			{name: "above max int32", port: math.MaxInt32 + 1, wantErr: true},
+			{name: "max valid port", port: maxValidPort, want: maxValidPort},
+			{name: "above max valid port", port: maxValidPort + 1, wantErr: true},
+			{name: "max int32", port: math.MaxInt32, wantErr: true},
 			{name: "max uint32", port: math.MaxUint32, wantErr: true},
 		}
 
@@ -52,9 +52,11 @@ func TestPortToInt32(t *testing.T) {
 			want    int32
 			wantErr bool
 		}{
-			{name: "zero", port: 0, want: 0},
+			{name: "zero means unavailable", port: 0, want: 0},
 			{name: "valid port", port: 8080, want: 8080},
-			{name: "max int32", port: math.MaxInt32, want: math.MaxInt32},
+			{name: "max valid port", port: maxValidPort, want: maxValidPort},
+			{name: "above max valid port", port: maxValidPort + 1, wantErr: true},
+			{name: "max int32", port: math.MaxInt32, wantErr: true},
 			{name: "above max int32", port: math.MaxInt32 + 1, wantErr: true},
 			{name: "negative", port: -1, wantErr: true},
 			{name: "min int64", port: math.MinInt64, wantErr: true},

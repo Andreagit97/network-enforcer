@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"strconv"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
@@ -33,8 +32,9 @@ type flowPort interface {
 }
 
 // portToInt32 narrows a port reported by a CNI flow API to int32, the range check avoids a gosec suppression.
+// A port of 0 is accepted because it is the value the flow APIs report when the port is unavailable.
 func portToInt32[T flowPort](port T) (int32, error) {
-	if port < 0 || port > math.MaxInt32 {
+	if port < 0 || port > maxValidPort {
 		return 0, fmt.Errorf("%w: %d", errPortOutOfRange, port)
 	}
 	return int32(port), nil
