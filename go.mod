@@ -4,7 +4,7 @@ go 1.26.6
 
 require (
 	github.com/avast/retry-go/v4 v4.7.0
-	github.com/cilium/cilium v1.20.0
+	github.com/cilium/cilium v1.20.1
 	github.com/go-logr/logr v1.4.4
 	github.com/stretchr/testify v1.12.1
 	github.com/yuin/gopher-lua v1.1.2
