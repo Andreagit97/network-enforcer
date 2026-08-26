@@ -123,6 +123,7 @@ func installNetEnforcerChart() env.Func {
 			helm.WithArgs("--create-namespace"),
 			helm.WithArgs("--set", fmt.Sprintf("controller.image.repository=%s", controllerRepo)),
 			helm.WithArgs("--set", fmt.Sprintf("controller.image.tag=%s", controllerTag)),
+			helm.WithArgs("--set", "controller.logLevel=debug"),
 			helm.WithArgs("--set", fmt.Sprintf("controller.provider.name=%s", testCfg.ProviderName())),
 			helm.WithArgs("--set", fmt.Sprintf("controller.wnpStatusUpdateInterval=%s",
 				testCfg.wnpStatusUpdateInterval.String())),

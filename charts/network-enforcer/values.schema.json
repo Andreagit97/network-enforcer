@@ -57,6 +57,15 @@
                     },
                     "additionalProperties": false
                 },
+                "logLevel": {
+                    "type": "string",
+                    "enum": [
+                        "debug",
+                        "info",
+                        "warn",
+                        "error"
+                    ]
+                },
                 "nodeSelector": {
                     "type": "object",
                     "additionalProperties": false
