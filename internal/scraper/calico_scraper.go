@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 
+	"github.com/rancher-sandbox/network-enforcer/internal/flowdumper"
 	pb "github.com/rancher-sandbox/network-enforcer/internal/scraper/goldmane"
 	"github.com/rancher-sandbox/network-enforcer/internal/tlsutil"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
@@ -25,6 +26,7 @@ type CalicoScraperConfig struct {
 	EnqueueLearningEvent LearningEnqueueFunc
 	Logger               *slog.Logger
 	ViolationBuffer      *violation.Buffer
+	FlowDumperBuffer     *flowdumper.Buffer
 }
 
 type CalicoScraper struct {
@@ -94,6 +96,7 @@ func (s *CalicoScraper) stream(ctx context.Context, successfulConnection *bool) 
 			return fmt.Errorf("error receiving flow from Goldmane: %w", recvErr)
 		}
 		*successfulConnection = true
+		dumpFlow(ctx, s.Logger, s.FlowDumperBuffer, flowResult)
 
 		result := resolveParsedFlow(ctx, s.resolve, bindResolveDenyingPolicy(s.Client), parseCalicoFlow(flowResult))
 		switch result.outcome {

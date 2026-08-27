@@ -12,6 +12,7 @@ import (
 	"time"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
+	"github.com/rancher-sandbox/network-enforcer/internal/flowdumper"
 	"github.com/rancher-sandbox/network-enforcer/internal/istio"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
@@ -56,6 +57,7 @@ type IstioScraperConfig struct {
 	ViolationOtelLogger  otellog.Logger
 	OtelPort             int
 	Enricher             *istio.Enricher
+	FlowDumperBuffer     *flowdumper.Buffer
 }
 
 // IstioScraper receives OTLP log events from istio-watchers.
@@ -137,7 +139,7 @@ func (s *IstioScraper) Export(
 		for _, scopeLogs := range resourceLogs.GetScopeLogs() {
 			for _, record := range scopeLogs.GetLogRecords() {
 				attrs := mergeAttrMaps(resourceAttrs, attrMap(record.GetAttributes()))
-				s.Logger.InfoContext(ctx, "Received OTLP log record", "attrs", attrs)
+				dumpFlow(ctx, s.Logger, s.FlowDumperBuffer, record)
 				switch attrs[eventTypeKey] {
 				case eventTypeLearn:
 					s.enqueueLearningEvent(ctx, attrs)

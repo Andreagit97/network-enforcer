@@ -9,6 +9,7 @@ import (
 	"time"
 
 	retry "github.com/avast/retry-go/v4"
+	"github.com/rancher-sandbox/network-enforcer/internal/flowdumper"
 )
 
 func isContextCancellation(err error) bool {
@@ -75,4 +76,19 @@ func runStreamWithReconnect(
 	logger.InfoContext(ctx, name+" scraper shutting down due to context cancel")
 	//nolint:nilerr // ignore context cancellation errors
 	return nil
+}
+
+func dumpFlow(
+	ctx context.Context,
+	logger *slog.Logger,
+	buf *flowdumper.Buffer,
+	record any,
+) {
+	if buf == nil {
+		return
+	}
+	// for now we don't keep track of the drops since this buffer is supposed to drop if nobody is reading from it
+	if _, err := buf.RecordAny(record); err != nil {
+		logger.WarnContext(ctx, "Failed to record flow debug data", "error", err)
+	}
 }

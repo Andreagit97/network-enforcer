@@ -7,6 +7,7 @@ import (
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	hubbleObserver "github.com/cilium/cilium/api/v1/observer"
+	"github.com/rancher-sandbox/network-enforcer/internal/flowdumper"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -20,6 +21,7 @@ type CiliumScraperConfig struct {
 	Endpoint             string
 	EnqueueLearningEvent LearningEnqueueFunc
 	ViolationBuffer      *violation.Buffer
+	FlowDumperBuffer     *flowdumper.Buffer
 }
 
 type CiliumScraper struct {
@@ -78,7 +80,7 @@ func (s *CiliumScraper) stream(ctx context.Context, successfulConnection *bool) 
 			return fmt.Errorf("error receiving flow from Hubble: %w", recvErr)
 		}
 		*successfulConnection = true
-
+		dumpFlow(ctx, s.Logger, s.FlowDumperBuffer, flow)
 		result := s.processFlow(ctx, flow)
 		switch result.outcome {
 		case processFlowOutcomeSkip:
