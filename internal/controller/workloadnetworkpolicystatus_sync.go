@@ -226,7 +226,7 @@ func (r *WorkloadNetworkPolicyStatusSync) wnpKeyForViolation(
 	wnpByKey map[types.NamespacedName]*securityv1alpha1.WorkloadNetworkPolicy,
 ) (types.NamespacedName, bool) {
 	if obs.DenyingPolicyName == "" {
-		// The scraper was not able to correlate the observation we cannot do anything here.
+		// The scraper was not able to correlate the observation, we cannot do anything here.
 		return types.NamespacedName{}, false
 	}
 
