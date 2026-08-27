@@ -2,20 +2,23 @@ package flowdumper
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/rancher-sandbox/network-enforcer/internal/ringbuf"
 )
 
 type Dumper struct {
-	Buffer *Buffer
+	Buffer *ringbuf.Buffer[json.RawMessage]
 	Logger *slog.Logger
 	server *http.Server
 }
 
 func New(
-	buffer *Buffer,
+	buffer *ringbuf.Buffer[json.RawMessage],
 	logger *slog.Logger,
 	port int,
 ) (*Dumper, error) {

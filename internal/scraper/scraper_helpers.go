@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,7 +10,9 @@ import (
 	"time"
 
 	retry "github.com/avast/retry-go/v4"
-	"github.com/rancher-sandbox/network-enforcer/internal/flowdumper"
+	"github.com/rancher-sandbox/network-enforcer/internal/ringbuf"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 func isContextCancellation(err error) bool {
@@ -78,17 +81,38 @@ func runStreamWithReconnect(
 	return nil
 }
 
+func marshalFlow(flow any) (json.RawMessage, error) {
+	if msg, ok := flow.(proto.Message); ok {
+		raw, err := protojson.Marshal(msg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal proto flow: %w", err)
+		}
+		return raw, nil
+	}
+
+	raw, err := json.Marshal(flow)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal flow: %w", err)
+	}
+	return raw, nil
+}
+
 func dumpFlow(
 	ctx context.Context,
 	logger *slog.Logger,
-	buf *flowdumper.Buffer,
+	buf *ringbuf.Buffer[json.RawMessage],
 	record any,
 ) {
 	if buf == nil {
 		return
 	}
-	// for now we don't keep track of the drops since this buffer is supposed to drop if nobody is reading from it
-	if _, err := buf.RecordAny(record); err != nil {
-		logger.WarnContext(ctx, "Failed to record flow debug data", "error", err)
+
+	marshaled, err := marshalFlow(record)
+	if err != nil {
+		logger.WarnContext(ctx, "Failed to marshal flow debug data", "error", err)
+		return
 	}
+
+	// for now we don't keep track of the drops since this buffer is supposed to drop if nobody is reading from it
+	_ = buf.Record(marshaled)
 }

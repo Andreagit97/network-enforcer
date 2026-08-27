@@ -2,11 +2,12 @@ package scraper
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
 
-	"github.com/rancher-sandbox/network-enforcer/internal/flowdumper"
+	"github.com/rancher-sandbox/network-enforcer/internal/ringbuf"
 	pb "github.com/rancher-sandbox/network-enforcer/internal/scraper/goldmane"
 	"github.com/rancher-sandbox/network-enforcer/internal/tlsutil"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
@@ -25,8 +26,8 @@ type CalicoScraperConfig struct {
 	Endpoint             string
 	EnqueueLearningEvent LearningEnqueueFunc
 	Logger               *slog.Logger
-	ViolationBuffer      *violation.Buffer
-	FlowDumperBuffer     *flowdumper.Buffer
+	ViolationBuffer      *ringbuf.Buffer[violation.Observation]
+	FlowDumperBuffer     *ringbuf.Buffer[json.RawMessage]
 }
 
 type CalicoScraper struct {

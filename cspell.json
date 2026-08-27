@@ -114,6 +114,7 @@
 		"loglevel",
 		"testutil",
 		"flowdumper",
+		"ringbuf",
     ],
     "import": []
 }

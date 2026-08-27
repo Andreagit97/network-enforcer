@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -12,8 +13,8 @@ import (
 	"time"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
-	"github.com/rancher-sandbox/network-enforcer/internal/flowdumper"
 	"github.com/rancher-sandbox/network-enforcer/internal/istio"
+	"github.com/rancher-sandbox/network-enforcer/internal/ringbuf"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	otellog "go.opentelemetry.io/otel/log"
@@ -51,13 +52,13 @@ const (
 
 // IstioScraperConfig configures IstioScraper.
 type IstioScraperConfig struct {
-	ViolationBuffer      *violation.Buffer
+	ViolationBuffer      *ringbuf.Buffer[violation.Observation]
 	EnqueueLearningEvent LearningEnqueueFunc
 	Logger               *slog.Logger
 	ViolationOtelLogger  otellog.Logger
 	OtelPort             int
 	Enricher             *istio.Enricher
-	FlowDumperBuffer     *flowdumper.Buffer
+	FlowDumperBuffer     *ringbuf.Buffer[json.RawMessage]
 }
 
 // IstioScraper receives OTLP log events from istio-watchers.

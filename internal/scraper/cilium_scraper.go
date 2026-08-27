@@ -2,12 +2,13 @@ package scraper
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
 	hubbleObserver "github.com/cilium/cilium/api/v1/observer"
-	"github.com/rancher-sandbox/network-enforcer/internal/flowdumper"
+	"github.com/rancher-sandbox/network-enforcer/internal/ringbuf"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -20,8 +21,8 @@ type CiliumScraperConfig struct {
 	Logger               *slog.Logger
 	Endpoint             string
 	EnqueueLearningEvent LearningEnqueueFunc
-	ViolationBuffer      *violation.Buffer
-	FlowDumperBuffer     *flowdumper.Buffer
+	ViolationBuffer      *ringbuf.Buffer[violation.Observation]
+	FlowDumperBuffer     *ringbuf.Buffer[json.RawMessage]
 }
 
 type CiliumScraper struct {

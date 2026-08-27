@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -46,6 +47,7 @@ import (
 	"github.com/rancher-sandbox/network-enforcer/internal/events"
 	"github.com/rancher-sandbox/network-enforcer/internal/flowdumper"
 	"github.com/rancher-sandbox/network-enforcer/internal/istio"
+	"github.com/rancher-sandbox/network-enforcer/internal/ringbuf"
 	"github.com/rancher-sandbox/network-enforcer/internal/scraper"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
@@ -108,8 +110,8 @@ func setupProviderScraper(
 	mgr manager.Manager,
 	conf *config,
 	learningEnqueueFunc func(types.LearningEvent) bool,
-	violationBuffer *violation.Buffer,
-	flowDumperBuffer *flowdumper.Buffer,
+	violationBuffer *ringbuf.Buffer[violation.Observation],
+	flowDumperBuffer *ringbuf.Buffer[json.RawMessage],
 	eventLogger otellog.Logger,
 ) error {
 	providerName := types.Provider(conf.provider.name)
@@ -236,8 +238,8 @@ func setupFlowDumper(
 	logger *slog.Logger,
 	mgr manager.Manager,
 	conf *flowdumper.Config,
-) (*flowdumper.Buffer, error) {
-	flowDumperBuffer := flowdumper.NewBuffer(conf.BufferSize)
+) (*ringbuf.Buffer[json.RawMessage], error) {
+	flowDumperBuffer := ringbuf.NewWithSize[json.RawMessage](conf.BufferSize)
 	flowDumper, err := flowdumper.New(flowDumperBuffer, logger, conf.Port)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create flow dumper: %w", err)
@@ -285,10 +287,10 @@ func run(logger *slog.Logger, conf *config) error {
 	}
 
 	// Create the violation ring buffer shared
-	violationBuffer := violation.NewBuffer()
+	violationBuffer := ringbuf.New[violation.Observation]()
 
 	// Configure flowDumper if necessary
-	var flowDumperBuffer *flowdumper.Buffer
+	var flowDumperBuffer *ringbuf.Buffer[json.RawMessage]
 	flowDumperConf := conf.flowDumper
 	if flowDumperConf.Enabled {
 		logger.InfoContext(ctx, "Flow dumper enabled",
@@ -338,7 +340,7 @@ func setupControllers(
 	mgr manager.Manager,
 	conf *config,
 	eventLogger otellog.Logger,
-	violationBuffer *violation.Buffer,
+	violationBuffer *ringbuf.Buffer[violation.Observation],
 ) error {
 	if err := (&controller.WorkloadNetworkPolicyReconciler{
 		Client: mgr.GetClient(),

@@ -8,6 +8,7 @@ import (
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/istio"
+	"github.com/rancher-sandbox/network-enforcer/internal/ringbuf"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
 	"github.com/rancher-sandbox/network-enforcer/internal/violation"
 	"github.com/stretchr/testify/require"
@@ -225,7 +226,7 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 			t.Parallel()
 
 			learned := make([]types.LearningEvent, 0)
-			buffer := violation.NewBuffer()
+			buffer := ringbuf.New[violation.Observation]()
 			otelLogger := &fakeOtelEventLogger{}
 
 			scraper := NewIstioScraper(IstioScraperConfig{
@@ -392,7 +393,7 @@ func TestExportEnrichesObservations(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			buffer := violation.NewBuffer()
+			buffer := ringbuf.New[violation.Observation]()
 			otelLogger := &fakeOtelEventLogger{}
 			scraper := NewIstioScraper(IstioScraperConfig{
 				ViolationBuffer:     buffer,
