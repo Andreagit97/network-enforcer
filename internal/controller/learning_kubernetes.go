@@ -53,7 +53,7 @@ func (r *LearningReconciler) reconcileKubernetesProposal(
 	peer *securityv1alpha1.WorkloadRef,
 	direction networkingv1.PolicyType,
 	protocol corev1.Protocol,
-	dstPort int,
+	dstPort int32,
 ) error {
 	proposal := getProposalMetadata(workload, direction)
 
@@ -111,9 +111,9 @@ func (r *LearningReconciler) reconcileKubernetesProposal(
 func buildPeerAndPort(
 	peer *securityv1alpha1.WorkloadRef,
 	protocol corev1.Protocol,
-	dstPort int,
+	dstPort int32,
 ) (networkingv1.NetworkPolicyPeer, networkingv1.NetworkPolicyPort) {
-	port := intstr.FromInt(dstPort)
+	port := intstr.FromInt32(dstPort)
 
 	policyPeer := networkingv1.NetworkPolicyPeer{
 		NamespaceSelector: &metav1.LabelSelector{

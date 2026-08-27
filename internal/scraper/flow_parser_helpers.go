@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	securityv1alpha1 "github.com/rancher-sandbox/network-enforcer/api/v1alpha1"
 	"github.com/rancher-sandbox/network-enforcer/internal/types"
@@ -18,7 +19,38 @@ var (
 	errUnsupportedProtocol   = errors.New("unsupported protocol")
 	errEndpointHasNoWorkload = errors.New("endpoint has no associated workload")
 	errSkipWorkload          = errors.New("endpoint has no supported workload")
+	errPortOutOfRange        = errors.New("port is out of range")
 )
+
+const (
+	minValidPort = 1
+	maxValidPort = 65535
+)
+
+type flowPort interface {
+	~int64 | ~uint32
+}
+
+// portToInt32 narrows a port reported by a CNI flow API to int32, the range check avoids a gosec suppression.
+// A port of 0 is accepted because it is the value the flow APIs report when the port is unavailable.
+func portToInt32[T flowPort](port T) (int32, error) {
+	if port < 0 || port > maxValidPort {
+		return 0, fmt.Errorf("%w: %d", errPortOutOfRange, port)
+	}
+	return int32(port), nil
+}
+
+// parsePort parses a port coming from a string attribute and validates it against the 1 - 65535 range.
+func parsePort(port string) (int32, error) {
+	parsed, err := strconv.ParseInt(port, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("cannot parse port %q: %w", port, err)
+	}
+	if parsed < minValidPort || parsed > maxValidPort {
+		return 0, fmt.Errorf("%w: %d", errPortOutOfRange, parsed)
+	}
+	return portToInt32(parsed)
+}
 
 type processFlowOutcome int
 

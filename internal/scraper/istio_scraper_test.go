@@ -185,6 +185,26 @@ func TestExportRoutesRecordsByEventType(t *testing.T) {
 				dstNameKey:   "http-server",
 			},
 		},
+		{
+			name: "learn with out-of-range port is skipped",
+			attrs: map[string]string{
+				eventTypeKey:    eventTypeLearn,
+				dstNameKey:      "http-server-7bbf596dd9-4rgdc",
+				dstNamespaceKey: "default",
+				dstPortKey:      "70000",
+				srcIdentityKey:  "spiffe://cluster.local/ns/default/sa/http-client-sa",
+			},
+		},
+		{
+			name: "learn with non-numeric port is skipped",
+			attrs: map[string]string{
+				eventTypeKey:    eventTypeLearn,
+				dstNameKey:      "http-server-7bbf596dd9-4rgdc",
+				dstNamespaceKey: "default",
+				dstPortKey:      "http",
+				srcIdentityKey:  "spiffe://cluster.local/ns/default/sa/http-client-sa",
+			},
+		},
 	}
 
 	scheme := runtime.NewScheme()

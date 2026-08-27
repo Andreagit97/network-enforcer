@@ -52,7 +52,7 @@ func TestProcessIstioLearningEvent(t *testing.T) {
 		Selector:  metav1.LabelSelector{MatchLabels: map[string]string{"app": "http-server"}},
 	}
 
-	newEvent := func(dstPort int, srcIdentity string) netypes.LearningEvent {
+	newEvent := func(dstPort int32, srcIdentity string) netypes.LearningEvent {
 		return netypes.LearningEvent{
 			Source:  &securityv1alpha1.WorkloadRef{Identity: srcIdentity},
 			Dest:    httpServerRef,

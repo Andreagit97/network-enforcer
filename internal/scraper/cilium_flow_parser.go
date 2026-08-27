@@ -108,22 +108,26 @@ func violationTimestamp(flow *flowpb.Flow) metav1.Time {
 	return metav1.Now()
 }
 
-func extractPortAndProtocol(flowInfo *flowpb.Flow) (uint32, corev1.Protocol, error) {
+func extractPortAndProtocol(flowInfo *flowpb.Flow) (int32, corev1.Protocol, error) {
 	layer4 := flowInfo.GetL4()
 	if layer4 == nil {
 		return 0, "", errors.New("found flow with nil layer4")
 	}
-	var dstPort uint32
+	var rawPort uint32
 	var proto corev1.Protocol
 	switch layer4.GetProtocol().(type) {
 	case *flowpb.Layer4_TCP:
 		proto = corev1.ProtocolTCP
-		dstPort = layer4.GetTCP().GetDestinationPort()
+		rawPort = layer4.GetTCP().GetDestinationPort()
 	case *flowpb.Layer4_UDP:
 		proto = corev1.ProtocolUDP
-		dstPort = layer4.GetUDP().GetDestinationPort()
+		rawPort = layer4.GetUDP().GetDestinationPort()
 	default:
 		return 0, "", fmt.Errorf("%w: %T", errUnsupportedProtocol, layer4.GetProtocol())
+	}
+	dstPort, err := portToInt32(rawPort)
+	if err != nil {
+		return 0, "", err
 	}
 	return dstPort, proto, nil
 }
@@ -199,7 +203,7 @@ func parseCiliumFlowResponse(flow *flowpb.Flow) processFlowResult {
 				Source:    *sourceWorkload,
 				Dest:      *destWorkload,
 				Protocol:  proto,
-				DstPort:   int32(dstPort), //nolint:gosec // dstPort is always in the range 0 - 65535
+				DstPort:   dstPort,
 				Action:    securityv1alpha1.WorkloadNetworkPolicyModeProtect,
 				// for now our policy are of ALLOW type so we never have a
 				// correlation cilium-side. We will try to resolve the denying
@@ -214,7 +218,7 @@ func parseCiliumFlowResponse(flow *flowpb.Flow) processFlowResult {
 	return processFlowEnqueue(types.LearningEvent{
 		Source:   sourceWorkload,
 		Dest:     destWorkload,
-		DstPort:  int(dstPort),
+		DstPort:  dstPort,
 		Protocol: proto,
 		Backend:  securityv1alpha1.PolicyBackendKubernetes,
 	})
