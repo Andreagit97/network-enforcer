@@ -4,9 +4,9 @@ import (
 	"sync"
 )
 
-// MaxBufferEntries is the capacity of the ring buffer. When full, the oldest
+// maxBufferEntries is the capacity of the ring buffer. When full, the oldest
 // entry is overwritten.
-const MaxBufferEntries = 10_000
+const maxBufferEntries = 10_000
 
 // Buffer is a thread-safe ring buffer.
 type Buffer[T any] struct {
@@ -18,7 +18,7 @@ type Buffer[T any] struct {
 
 func NewWithSize[T any](size int) *Buffer[T] {
 	if size <= 0 {
-		size = MaxBufferEntries
+		size = maxBufferEntries
 	}
 	return &Buffer[T]{
 		buf:      make([]T, size),
@@ -27,7 +27,7 @@ func NewWithSize[T any](size int) *Buffer[T] {
 }
 
 func New[T any]() *Buffer[T] {
-	return NewWithSize[T](MaxBufferEntries)
+	return NewWithSize[T](maxBufferEntries)
 }
 
 // Record appends a record to the ring buffer. If the buffer is full,
