@@ -21,7 +21,7 @@ func New(
 	buffer *ringbuf.Buffer[json.RawMessage],
 	logger *slog.Logger,
 	port int,
-) (*Dumper, error) {
+) *Dumper {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/flow", func(w http.ResponseWriter, r *http.Request) {
 		records := buffer.Drain()
@@ -44,7 +44,7 @@ func New(
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
-	return &Dumper{Buffer: buffer, Logger: logger, server: server}, nil
+	return &Dumper{Buffer: buffer, Logger: logger, server: server}
 }
 
 func (d *Dumper) Start(ctx context.Context) error {

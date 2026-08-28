@@ -240,11 +240,8 @@ func setupFlowDumper(
 	conf *flowdumper.Config,
 ) (*ringbuf.Buffer[json.RawMessage], error) {
 	flowDumperBuffer := ringbuf.NewWithSize[json.RawMessage](conf.BufferSize)
-	flowDumper, err := flowdumper.New(flowDumperBuffer, logger, conf.Port)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create flow dumper: %w", err)
-	}
-	if err = mgr.Add(flowDumper); err != nil {
+	flowDumper := flowdumper.New(flowDumperBuffer, logger, conf.Port)
+	if err := mgr.Add(flowDumper); err != nil {
 		return nil, fmt.Errorf("unable to add flow dumper to manager: %w", err)
 	}
 	return flowDumperBuffer, nil
