@@ -37,12 +37,19 @@ func New(
 			}
 		}
 	})
-	const readHeaderTimeout = 5 * time.Second
+	const (
+		readHeaderTimeout = 5 * time.Second
+		// 5 seconds seem enough to write the response
+		writeTimeout = 5 * time.Second
+	)
 	server := &http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", port),
 		Handler:           mux,
 		ReadHeaderTimeout: readHeaderTimeout,
+		WriteTimeout:      writeTimeout,
 	}
+	// The server close the connection immediately
+	server.SetKeepAlivesEnabled(false)
 
 	return &Dumper{Buffer: buffer, Logger: logger, server: server}
 }
