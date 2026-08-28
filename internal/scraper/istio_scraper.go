@@ -140,6 +140,7 @@ func (s *IstioScraper) Export(
 		for _, scopeLogs := range resourceLogs.GetScopeLogs() {
 			for _, record := range scopeLogs.GetLogRecords() {
 				attrs := mergeAttrMaps(resourceAttrs, attrMap(record.GetAttributes()))
+				s.Logger.DebugContext(ctx, "Received OTLP log record", "attrs", attrs)
 				dumpFlow(ctx, s.Logger, s.FlowDumperBuffer, record)
 				switch attrs[eventTypeKey] {
 				case eventTypeLearn:
